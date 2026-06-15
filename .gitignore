@@ -1,0 +1,29 @@
+# HFSS 工程产出
+projects/
+*.aedt
+*.aedt.lock
+*.aedt.auto
+*.aedtresults/
+batch.log
+
+# 运行日志
+traces/
+*.jsonl
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+
+# 环境 / 配置 / 密钥
+.env
+.mcp.json
+settings.local.json
+
+# IDE
+.vscode/
+.idea/
+
+# 打包产物
+*.zip

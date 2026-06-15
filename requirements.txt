@@ -1,0 +1,4 @@
+# HFSS native MCP server 运行依赖 —— 比 gRPC 版轻:不需要 ansys-aedt-core / pyaedt。
+# 连接全走 win32com(pywin32)裸调 AEDT 原生脚本 API,跨版本(实测 2019.2 ~ 2025.2)。
+mcp>=1.27,<2
+pywin32

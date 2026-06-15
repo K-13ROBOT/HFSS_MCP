@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "ask": [
+      "mcp__hfss-agent-native__analyze"
+    ]
+  }
+}
