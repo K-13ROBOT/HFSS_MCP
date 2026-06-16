@@ -52,6 +52,31 @@ def create_parametric_sweep(ctx, name, variables, setup=None, save_fields=False)
         return {"ok": False, "error": "无 setup,先 create_setup"}
     setup = setup or setups[0]
 
+    # 表达式型变量(如 '0.1*109.1mm'、'MH1-1mm')直接进 OptiParametric 会 InsertSetup com_error。
+    # 建参扫前先把每个被扫变量钉成它求值后的纯数值(单位保留),避免崩;只读单值不影响下游引用。
+    oDesign = ctx["oDesign"]
+    pinned = []
+    for v in variables:
+        defn = ctx["state"].variables.get(v["name"]) if (state and v["name"] in getattr(state, "variables", {})) else None
+        try:
+            evaluated = str(oDesign.GetVariableValue(v["name"]))
+        except Exception:
+            evaluated = None
+        # defn 缺失时退而看求值结果;只要"定义"不是纯数值字面量,就钉成求值后的纯数值
+        ref = defn if defn is not None else evaluated
+        if ref is not None and not _NUM_LIT.match(ref.strip()) and evaluated and _NUM_LIT.match(evaluated.strip()):
+            try:
+                oDesign.ChangeProperty(
+                    ["NAME:AllTabs",
+                     ["NAME:LocalVariableTab",
+                      ["NAME:PropServers", "LocalVariables"],
+                      ["NAME:ChangedProps", ["NAME:" + v["name"], "Value:=", evaluated]]]])
+                if state is not None:
+                    state.variables[v["name"]] = evaluated
+                pinned.append({v["name"]: f"{ref} → {evaluated}"})
+            except Exception:
+                pass  # 钉不动就交给 InsertSetup,真崩了会在下面报出来
+
     sweeps_arg = ["NAME:Sweeps"]
     for v in variables:
         data = " ".join(str(x) for x in v["values"])
@@ -74,8 +99,12 @@ def create_parametric_sweep(ctx, name, variables, setup=None, save_fields=False)
         if not hasattr(state, "parametrics"):
             state.parametrics = {}
         state.parametrics[name] = {"variables": variables, "setup": setup, "save_fields": bool(save_fields)}
-    return {"ok": True, "name": name, "setup": setup, "n_combinations": n,
-            "variables": [v["name"] for v in variables], "save_fields": bool(save_fields)}
+    out = {"ok": True, "name": name, "setup": setup, "n_combinations": n,
+           "variables": [v["name"] for v in variables], "save_fields": bool(save_fields)}
+    if pinned:
+        out["pinned_to_numeric"] = pinned
+        out["note_pinned"] = "被扫变量原为表达式,已钉成求值后的纯数值(否则 OptiParametric 会 InsertSetup 失败)。"
+    return out
 
 
 @tool({
@@ -143,6 +172,38 @@ def _fnum(s):
     """从带单位字符串抽前导数值,如 '2.04GHz'→2.04、'180deg'→180。"""
     m = _NUMRE.search(str(s))
     return float(m.group()) if m else None
+
+
+# 纯数值字面量(带可选单位),如 '14.73mm'、'-3'、'2.4GHz';表达式(含 *、+、变量名等)不匹配。
+_NUM_LIT = _re_mod.compile(r"^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s*[a-zA-Z]*$")
+
+
+def _bands(pts):
+    """pts=[(freq, s_dB), ...] 已按 freq 升序;返回连续 -10dB 段 [[low, high, dip_f, dip_dB], ...]。
+    与 analysis.get_s_parameters 同一套分段逻辑,用来暴露双谐振中间的 -10dB 洞(别当连续超宽带)。"""
+    bands, cur = [], None
+    for f, s in pts:
+        if s <= -10.0:
+            if cur is None:
+                cur = [f, f, f, s]
+            else:
+                cur[1] = f
+                if s < cur[3]:
+                    cur[2], cur[3] = f, s
+        elif cur is not None:
+            bands.append(cur); cur = None
+    if cur is not None:
+        bands.append(cur)
+    return bands
+
+
+def _with_fails(resp, fails):
+    """把逐组失败信息挂到返回里(部分组合出报告失败时,仍返回成功组,不让一组炸毁全盘)。"""
+    if fails:
+        resp["n_failed"] = len(fails)
+        resp["failed_variations"] = fails
+        resp["note_failed"] = "部分组合出报告失败,已跳过,仅返回成功组(失败组见 failed_variations)。"
+    return resp
 
 
 def _param_report(oDesign, category, soln, context, families, trace, csv_path):
@@ -248,30 +309,47 @@ def get_parametric_results(ctx, parametric, setup=None, sweep="LastAdaptive", po
     trace = ["X Component:=", "Freq", "Y Component:=", [expr]]
     oDesign = ctx["oDesign"]
     # 逐 variation 钉单值(稳定,不改 nominal),宽表里按表头 Freq='..' 抽频率 + 数据行抽 S。
-    res = []
+    # 单组失败不再让整份报告作废:跳过该组、继续读成功组,失败组单列 error。
+    res, fails = [], []
     for i, vd in enumerate(variations):
         csv = _os.path.join(_csv_dir(), f"_par_{parametric}_S_{i}.csv")
         fam = _pin_fam(vd) + ["Freq:=", ["All"]]
         ok, err = _param_report(oDesign, "Modal Solution Data", soln, None, fam, trace, csv)
         if not ok:
-            return {"ok": False, "error": f"variation {vd} S 报告失败: {err}"}
+            fails.append({"variation": vd, "error": err})
+            res.append({"variation": vd, "resonant_freq": None, "min_S_dB": None, "error": err})
+            continue
         pts = _parse_wide(csv, "Freq", list(vd.values()))
         if not pts:
             res.append({"variation": vd, "resonant_freq": None, "min_S_dB": None})
             continue
         fmin, smin = min(pts, key=lambda t: t[1])
-        below = [f for f, s in pts if s <= -10.0]
-        res.append({"variation": vd, "resonant_freq": round(fmin, 4), "min_S_dB": round(smin, 2),
-                    "bw_-10dB_low": round(below[0], 4) if below else None,
-                    "bw_-10dB_high": round(below[-1], 4) if below else None,
-                    "matched_-10dB": bool(below)})
-    return {"ok": True, "parametric": parametric, "setup": setup, "sweep": sweep,
-            "n_variations": len(res), "results": res}
+        bands = _bands(pts)                          # 连续 -10dB 段,暴露双谐振中间的洞
+        entry = {"variation": vd, "resonant_freq": round(fmin, 4), "min_S_dB": round(smin, 2),
+                 "matched_-10dB": bool(bands), "n_resonances": len(bands)}
+        if bands:
+            bands.sort(key=lambda b: b[2])           # 基模 = 最低频段
+            prim = bands[0]
+            entry["bw_-10dB_low"] = round(prim[0], 4)
+            entry["bw_-10dB_high"] = round(prim[1], 4)
+            if len(bands) > 1:                       # 多段:别当连续超宽带,各段都列出
+                entry["resonances"] = [
+                    {"freq": round(b[2], 4), "min_dB": round(b[3], 2),
+                     "bw_low": round(b[0], 4), "bw_high": round(b[1], 4)} for b in bands]
+                entry["note"] = "多个独立 -10dB 段(中间有洞),bw 为基模段,勿当连续超宽带。"
+        else:
+            entry["bw_-10dB_low"] = None
+            entry["bw_-10dB_high"] = None
+        res.append(entry)
+    return _with_fails({"ok": True, "parametric": parametric, "setup": setup, "sweep": sweep,
+                        "n_variations": len(res), "results": res}, fails)
 
 
 def _ff_metric(ctx, parametric, expr, sphere, setup, sweep, phi=None, reduce_fn=max):
     """逐 variation 钉单值取远场 Theta 切面长表。
-    返回 (out, err),out=[(variation_dict, [((theta,), val), ...], reduced_val), ...]。"""
+    返回 (out, fails):out=[(variation_dict, [((theta,), val), ...], reduced_val), ...](含所有组合,
+    失败组 pts=[]、reduced=None);fails=[{variation, error}, ...]。
+    硬错(参扫未知)返回 (None, err_str)。单组失败不再让整份报告作废。"""
     st = ctx.get("state")
     names, variations = _variations(ctx, parametric)
     if not names:
@@ -281,17 +359,19 @@ def _ff_metric(ctx, parametric, expr, sphere, setup, sweep, phi=None, reduce_fn=
     trace = ["X Component:=", "Theta", "Y Component:=", [expr]]
     oDesign = ctx["oDesign"]
     # 逐 variation 钉单值(稳定);宽表表头 Theta='5deg' 抽角度 + 数据行抽增益。
-    out = []
+    out, fails = [], []
     for i, vd in enumerate(variations):
         csv = _os.path.join(_csv_dir(), f"_par_{parametric}_ff_{i}.csv")
         fam = _pin_fam(vd) + ["Theta:=", ["All"], "Phi:=", [str(phi)] if phi else ["All"], "Freq:=", ["All"]]
         ok, err = _param_report(oDesign, "Far Fields", soln, sphere, fam, trace, csv)
         if not ok:
-            return None, err
+            out.append((vd, [], None))
+            fails.append({"variation": vd, "error": err})
+            continue
         pts = [((t,), v) for t, v in _parse_wide(csv, "Theta", list(vd.values()))]
         vals = [v for _, v in pts]
         out.append((vd, pts, reduce_fn(vals) if vals else None))
-    return out, None
+    return out, fails
 
 
 @tool({"type": "function", "function": {
@@ -305,16 +385,16 @@ def _ff_metric(ctx, parametric, expr, sphere, setup, sweep, phi=None, reduce_fn=
         "required": ["parametric"]}}})
 def get_parametric_gain(ctx, parametric, sphere="Sphere1", setup=None, sweep="LastAdaptive",
                         gain_type="realized", polarization="total"):
-    out, err = _ff_metric(ctx, parametric, _gain_expr(gain_type, polarization), sphere, setup, sweep)
-    if err:
-        return {"ok": False, "error": f"远场增益报告失败: {err}"}
+    out, fails = _ff_metric(ctx, parametric, _gain_expr(gain_type, polarization), sphere, setup, sweep)
+    if out is None:
+        return {"ok": False, "error": f"远场增益报告失败: {fails}"}
     res = []
     for var, pts, pk in out:
         bs = [v for i, v in pts if i and abs(i[0]) < 1e-3]
         res.append({"variation": var, "peak_gain_dB": round(pk, 2) if pk is not None else None,
                     "broadside_gain_dB": round(max(bs), 2) if bs else None})
-    return {"ok": True, "parametric": parametric, "gain_type": gain_type, "polarization": polarization,
-            "n_variations": len(res), "results": res}
+    return _with_fails({"ok": True, "parametric": parametric, "gain_type": gain_type,
+                        "polarization": polarization, "n_variations": len(res), "results": res}, fails)
 
 
 @tool({"type": "function", "function": {
@@ -325,16 +405,16 @@ def get_parametric_gain(ctx, parametric, sphere="Sphere1", setup=None, sweep="La
         "setup": {"type": "string"}, "sweep": {"type": "string", "default": "LastAdaptive"},
         "threshold_dB": {"type": "number", "default": 3.0}}, "required": ["parametric"]}}})
 def get_parametric_axial_ratio(ctx, parametric, sphere="Sphere1", setup=None, sweep="LastAdaptive", threshold_dB=3.0):
-    out, err = _ff_metric(ctx, parametric, "dB(AxialRatioValue)", sphere, setup, sweep, reduce_fn=min)
-    if err:
-        return {"ok": False, "error": f"轴比报告失败: {err}"}
+    out, fails = _ff_metric(ctx, parametric, "dB(AxialRatioValue)", sphere, setup, sweep, reduce_fn=min)
+    if out is None:
+        return {"ok": False, "error": f"轴比报告失败: {fails}"}
     res = []
     for var, pts, best in out:
         bs = [v for i, v in pts if i and abs(i[0]) < 1e-3]
         res.append({"variation": var, "best_AR_dB": round(best, 2) if best is not None else None,
                     "broadside_AR_dB": round(min(bs), 2) if bs else None,
                     "is_CP_at_broadside": bool(bs and min(bs) < threshold_dB)})
-    return {"ok": True, "parametric": parametric, "n_variations": len(res), "results": res}
+    return _with_fails({"ok": True, "parametric": parametric, "n_variations": len(res), "results": res}, fails)
 
 
 @tool({"type": "function", "function": {
@@ -348,16 +428,16 @@ def get_parametric_axial_ratio(ctx, parametric, sphere="Sphere1", setup=None, sw
         "required": ["parametric"]}}})
 def get_parametric_front_to_back(ctx, parametric, sphere="Sphere1", setup=None, sweep="LastAdaptive",
                                  gain_type="realized", polarization="total"):
-    out, err = _ff_metric(ctx, parametric, _gain_expr(gain_type, polarization), sphere, setup, sweep, phi="0deg")
-    if err:
-        return {"ok": False, "error": f"前后比报告失败: {err}"}
+    out, fails = _ff_metric(ctx, parametric, _gain_expr(gain_type, polarization), sphere, setup, sweep, phi="0deg")
+    if out is None:
+        return {"ok": False, "error": f"前后比报告失败: {fails}"}
     res = []
     for var, pts, _ in out:
         front = [v for i, v in pts if i and abs(i[0]) < 2]
         back = [v for i, v in pts if i and abs(i[0] - 180) < 2]
         res.append({"variation": var,
                     "front_to_back_dB": round(max(front) - max(back), 2) if front and back else None})
-    return {"ok": True, "parametric": parametric, "n_variations": len(res), "results": res}
+    return _with_fails({"ok": True, "parametric": parametric, "n_variations": len(res), "results": res}, fails)
 
 
 @tool({"type": "function", "function": {
@@ -372,9 +452,9 @@ def get_parametric_front_to_back(ctx, parametric, sphere="Sphere1", setup=None, 
         "required": ["parametric"]}}})
 def get_parametric_hpbw(ctx, parametric, phi_cut="0deg", sphere="Sphere1", setup=None, sweep="LastAdaptive",
                         gain_type="realized", polarization="total"):
-    out, err = _ff_metric(ctx, parametric, _gain_expr(gain_type, polarization), sphere, setup, sweep, phi=phi_cut)
-    if err:
-        return {"ok": False, "error": f"HPBW 报告失败: {err}"}
+    out, fails = _ff_metric(ctx, parametric, _gain_expr(gain_type, polarization), sphere, setup, sweep, phi=phi_cut)
+    if out is None:
+        return {"ok": False, "error": f"HPBW 报告失败: {fails}"}
     res = []
     for var, pts, _ in out:
         tg = sorted([(i[0], v) for i, v in pts if i], key=lambda t: t[0])
@@ -390,7 +470,8 @@ def get_parametric_hpbw(ctx, parametric, phi_cut="0deg", sphere="Sphere1", setup
             if tg[k][1] >= half > tg[k + 1][1]:
                 right = tg[k][0] + (tg[k + 1][0] - tg[k][0]) * (tg[k][1] - half) / (tg[k][1] - tg[k + 1][1]); break
         res.append({"variation": var, "peak_gain_dB": round(pkg, 2), "HPBW_deg": round(abs(right - left), 1)})
-    return {"ok": True, "parametric": parametric, "phi_cut": phi_cut, "n_variations": len(res), "results": res}
+    return _with_fails({"ok": True, "parametric": parametric, "phi_cut": phi_cut,
+                        "n_variations": len(res), "results": res}, fails)
 
 
 @tool({"type": "function", "function": {
@@ -407,12 +488,12 @@ def get_parametric_cross_pol_isolation(ctx, parametric, co_pol, sphere="Sphere1"
     cx = _CROSS.get(co_pol)
     if not cx:
         return {"ok": False, "error": f"co_pol 不合法: {co_pol}"}
-    co_out, e1 = _ff_metric(ctx, parametric, _gain_expr(gain_type, co_pol), sphere, setup, sweep, phi="0deg")
-    if e1:
-        return {"ok": False, "error": f"co 报告失败: {e1}"}
-    cx_out, e2 = _ff_metric(ctx, parametric, _gain_expr(gain_type, cx), sphere, setup, sweep, phi="0deg")
-    if e2:
-        return {"ok": False, "error": f"cross 报告失败: {e2}"}
+    co_out, f1 = _ff_metric(ctx, parametric, _gain_expr(gain_type, co_pol), sphere, setup, sweep, phi="0deg")
+    if co_out is None:
+        return {"ok": False, "error": f"co 报告失败: {f1}"}
+    cx_out, f2 = _ff_metric(ctx, parametric, _gain_expr(gain_type, cx), sphere, setup, sweep, phi="0deg")
+    if cx_out is None:
+        return {"ok": False, "error": f"cross 报告失败: {f2}"}
     cx_map = {tuple(sorted(v.items())): pts for v, pts, _ in cx_out}
     res = []
     for var, co_pts, _ in co_out:
@@ -420,4 +501,5 @@ def get_parametric_cross_pol_isolation(ctx, parametric, co_pol, sphere="Sphere1"
         cx_bs = [v for i, v in cx_map.get(tuple(sorted(var.items())), []) if i and abs(i[0]) < 2]
         res.append({"variation": var, "co_pol": co_pol, "cross_pol": cx,
                     "isolation_dB": round(max(co_bs) - max(cx_bs), 2) if co_bs and cx_bs else None})
-    return {"ok": True, "parametric": parametric, "n_variations": len(res), "results": res}
+    return _with_fails({"ok": True, "parametric": parametric, "n_variations": len(res), "results": res},
+                       (f1 or []) + (f2 or []))

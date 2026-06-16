@@ -6,6 +6,7 @@
 
 ## 跨类型通用
 - [_general.md](_general.md) — 不限天线类型的通用经验(建模/馈电/求解/匹配的共性坑)
+- [_optimization.md](_optimization.md) — 参扫/匹配/方向图优化的坑与方法论(开工要扫参/调匹配/优化时先读)
 
 ## 按天线类型
 - [microstrip-patch.md](microstrip-patch.md) — 矩形微带贴片(边馈/inset/探针/CP 切角)
