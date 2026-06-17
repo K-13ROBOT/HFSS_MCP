@@ -88,10 +88,20 @@ def _merge_json_file(path: Path, patch: dict, top_key: str, sub_key: str):
     print(f"  [写] {path}")
 
 
+def _skill_ignore(dirpath, names):
+    """copytree 过滤:knowledge/ 和 design/ 里**按天线类型命名**的 .md 不复制——
+    那是运行时积累的个人经验(如 magneto-electric-dipole.md),不随分发走,也不覆盖
+    用户安装副本里已攒的。只带通用框架:SKILL.md、`_*.md`(_general/_optimization/_TEMPLATE)、INDEX.md。"""
+    if os.path.basename(dirpath).lower() not in ("knowledge", "design"):
+        return []
+    return [n for n in names
+            if n.lower().endswith(".md") and not n.startswith("_") and n.lower() != "index.md"]
+
+
 def install_skill(dest_skills_dir: Path):
     dest = dest_skills_dir / SKILL_SRC.name
-    shutil.copytree(SKILL_SRC, dest, dirs_exist_ok=True)
-    print(f"  [写] {dest}")
+    shutil.copytree(SKILL_SRC, dest, dirs_exist_ok=True, ignore=_skill_ignore)
+    print(f"  [写] {dest}(仅通用框架;按天线类型的 knowledge/design 卡片不复制,保留安装副本已有的)")
 
 
 def install_project(project_dir: str):
