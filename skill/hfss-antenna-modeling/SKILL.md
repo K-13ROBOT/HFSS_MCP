@@ -74,6 +74,7 @@ description: >-
 - "打开/启动 HFSS" → `open_desktop`
 - "连接已有 HFSS" → `attach_desktop`,再 `list_projects`
 - "新建工程 X" → `new_project`;"新建设计 X" → `new_design`
+- "打开 D:\...\xxx.aedt" / 复现已有工程 → `open_project`(传完整路径,唯一 design 自动激活)
 - "切到工程/设计 X" → `activate_project` / `activate_design`
 - 不确定状态 → `list_projects` / `list_designs` / `design_summary`
 

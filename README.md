@@ -11,11 +11,11 @@
 - 连接 = `win32com.Dispatch("Ansoft.ElectronicsDesktop." + version)`(ProgID 每个装机版本都注册),不卡 PyAEDT 版本下限,也不依赖 gRPC(2022R2+ 才有)。
 - 操作 = AEDT 原生脚本 API(宏录制那套),自 ~v15 稳定。
 
-## 能做什么(65 个工具)
+## 能做什么(66 个工具)
 
 | 域 | 能力 |
 |---|---|
-| **会话** | open/attach/close、新建/切换 工程与设计、列举、reset |
+| **会话** | open/attach/close、新建工程与设计、**从路径打开已有 .aedt**、切换/列举、reset |
 | **几何** | box/rectangle/cylinder/sphere/polyline、布尔(并/减/交)、变换(移动/旋转/镜像/线阵·环阵复制)、变量驱动、材料(含**自定义 εr/tanδ**)、delete |
 | **自检** | `get_object_bbox`(看层叠/搭接)、`design_summary`、list_objects/variables |
 | **边界** | Perfect E / Perfect H / 有限电导率 / 阻抗面 / 集总 RLC、开放辐射边界、远场球 |
@@ -141,7 +141,7 @@ server 是标准 MCP stdio,**任何 MCP 客户端都能挂**(Claude Desktop、Cl
 1. **最弱的是"读图/理解复杂结构"那半边,不是建模管线**。折叠/多层/定制馈电这类复杂拓扑,AI 从图反推容易错,仍要靠用户确认结构(skill §0 已尽量兜底)。
 2. `analyze` 阻塞,**暂无 Ctrl+C 中止**。
 3. 经验库还年轻(随用随厚)。
-4. 工具偏多(65),每轮 token 有成本。
+4. 工具偏多(66),每轮 token 有成本。
 
 ## 未来方向
 

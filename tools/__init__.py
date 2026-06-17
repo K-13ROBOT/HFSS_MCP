@@ -14,7 +14,7 @@ TOOLS = {}
 # 不需要 active design 即可调用(会话管理类 + 设计卡片只读检索)
 NO_HFSS_REQUIRED = {
     "open_desktop", "attach_desktop", "close_desktop", "reset_session",
-    "new_project", "activate_project", "list_projects",
+    "new_project", "open_project", "activate_project", "list_projects",
     "new_design", "activate_design", "list_designs",
     "search_designs", "list_design_cards", "check_design_targets",
 }

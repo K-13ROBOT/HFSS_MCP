@@ -156,6 +156,91 @@ def new_project(ctx, name):
 @tool({
     "type": "function",
     "function": {
+        "name": "open_project",
+        "description": ("从磁盘路径打开已有 .aedt 工程(desktop 须先 open_desktop/attach_desktop)。"
+                        "打开后:只有一个 design 时自动激活它;多个则列出 designs 待 activate_design。"
+                        "工程已在打开列表里则直接激活、不重复打开。"),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": r"完整 .aedt 路径,如 'D:\work\patch.aedt'"},
+                "activate_design": {"type": "string",
+                                    "description": "(可选)打开后要激活的 design 名;不传且工程内仅一个 design 时自动激活"},
+            },
+            "required": ["path"],
+        },
+    },
+})
+def open_project(ctx, path, activate_design=None):
+    oDesktop = ctx.get("oDesktop")
+    if oDesktop is None:
+        return {"ok": False, "error": "未打开 desktop,先 open_desktop 或 attach_desktop"}
+    p = os.path.abspath(os.path.expanduser(str(path)))
+    if not os.path.isfile(p):
+        return {"ok": False, "error": f"找不到文件: {p}"}
+    if not p.lower().endswith(".aedt"):
+        return {"ok": False, "error": "路径必须是 .aedt 文件(.aedtz 归档请先在 HFSS 里解包)"}
+    base = os.path.splitext(os.path.basename(p))[0]
+    try:
+        open_list = list(oDesktop.GetProjectList() or [])
+    except Exception:
+        open_list = []
+    already = base in open_list
+    try:
+        if already:
+            try:
+                oProject = oDesktop.SetActiveProject(base)
+            except Exception:
+                oProject = None
+        else:
+            oProject = oDesktop.OpenProject(p)   # 新版返回 oProject;老版可能返回 None
+        if oProject is None:
+            oProject = oDesktop.GetActiveProject()
+        if oProject is None:
+            return {"ok": False, "error": "打开后取不到 oProject(版本兼容问题?)"}
+    except Exception as e:
+        return {"ok": False, "error": f"打开工程失败: {type(e).__name__}: {e}"}
+    try:
+        pname = oProject.GetName()
+    except Exception:
+        pname = base
+    ctx["oProject"] = oProject
+    ctx["project_name"] = pname
+    ctx["oDesign"] = None
+    ctx["oEditor"] = None
+    ctx["design_name"] = None
+    if "state" in ctx:
+        ctx["state"].project = pname
+    try:
+        designs = list(oProject.GetTopDesignList() or [])
+    except Exception:
+        designs = []
+    target = activate_design or (designs[0] if len(designs) == 1 else None)
+    activated, act_err = None, None
+    if target:
+        try:
+            oDesign = oProject.SetActiveDesign(target)
+            oEditor = oDesign.SetActiveEditor("3D Modeler")
+            ctx["oDesign"] = oDesign
+            ctx["oEditor"] = oEditor
+            ctx["design_name"] = target
+            if "state" in ctx:
+                ctx["state"].design = target
+            activated = target
+        except Exception as e:
+            act_err = f"{type(e).__name__}: {e}"
+    out = {"ok": True, "project": pname, "path": p, "already_open": already,
+           "designs": designs, "active_design": activated}
+    if act_err:
+        out["activate_warning"] = f"激活 design '{target}' 失败: {act_err},请手动 activate_design"
+    elif not activated and designs:
+        out["note"] = f"工程有 {len(designs)} 个 design,用 activate_design 选一个再建模/求解。"
+    return out
+
+
+@tool({
+    "type": "function",
+    "function": {
         "name": "new_design",
         "description": ("在 active project 新建 HFSS design 并激活。solution_type 默认 'Modal'(Driven Modal)。"),
         "parameters": {
