@@ -173,6 +173,14 @@ description: >-
 - 多层结构:不同金属层(开槽地、馈线、上层辐射体…)是各自独立的 sheet,别混用同一个对象
 - 匹配段(stub、缝隙尺寸、耦合间距…)先按经验估,设成变量后靠 §8 扫参优化
 
+## 6.6 周期单元(无限阵 / FSS / 超表面)
+做无限大周期结构的**单元(unit cell)**仿真时,用主从边界 + Floquet 端口,**不要** `create_open_region`(那是孤立天线的开放边界):
+1. 建一个轴对齐的**单元盒**(真空盒,xy 尺寸 = 晶格周期 px×py,z 向留足到辐射体上方 ≥λ/4),周期结构建在盒内。
+2. `assign_periodic_boundaries(unit_cell=盒名, scan_theta, scan_phi)`:给 ±X、±Y 四侧面自动配主从,扫描角设入射方向。
+3. `assign_floquet_port(name, unit_cell, side='+z', num_modes=2, scan_theta, scan_phi)`:顶面配 Floquet 端口。**做透射的 FSS/超表面要在 `+z` 和 `-z` 各配一个**;扫描角必须与主从一致。
+4. `create_setup` + `create_sweep` + `analyze` 照常;S 参数即各 Floquet 模的反射/透射(如 S11=反射、S21=透射)。
+要点:单元盒须长方体(晶格矢量/面坐标从其包围盒自动推);扫描入射角 = 主从与 Floquet 的 θ/φ 一起改。(注:Floquet/主从的 COM 调用尚未逐版本真机回归,首次用盯结果。)
+
 ## 7. 远场仿真(增益/轴比/HPBW/F-B/隔离度)
 S 参数流程外加:
 - setup 之前调 `create_infinite_sphere`(默认 θ 0-180°/2°、φ 0-360°/5° 够用)
@@ -215,3 +223,4 @@ get_parametric_* 异常(只 1 个 variation、字段全空)时先让用户排查
 6. **收工沉淀**:做出达标设计后,按 §0.3 把它录成/更新 `design/<type>.md`(归一化尺寸 + 实测 performance + 出处),让卡片库复利增厚。
 
 要点:**先对标再调、调完再对标**,每轮用 `check_design_targets` 闭合;多目标在 targets 里一次列全(频率~=、S11/AR<=、增益/带宽>=),别只盯一个把别的调坏(尤其 §8 提的多端口跷跷板、方向图频率稳定性守恒)。
+
