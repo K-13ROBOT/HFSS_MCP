@@ -16,7 +16,7 @@ NO_HFSS_REQUIRED = {
     "open_desktop", "attach_desktop", "close_desktop", "reset_session",
     "new_project", "activate_project", "list_projects",
     "new_design", "activate_design", "list_designs",
-    "search_designs", "list_design_cards",
+    "search_designs", "list_design_cards", "check_design_targets",
 }
 
 # 调用前必须用户确认的工具(阻塞 / 耗资源)。环境变量 HFSS_AGENT_AUTOCONFIRM=1 跳过。

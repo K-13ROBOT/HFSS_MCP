@@ -177,3 +177,70 @@ def search_designs(ctx, frequency_ghz=None, polarization=None, topology=None, mi
             "source": fm.get("source"), "matched": why})
     return {"ok": True, "dir": d, "n_matches": len(out), "matches": out,
             "hint": "用 Read 打开匹配卡的 path 看闭式公式/归一化尺寸,按 frequency_ghz 缩放算起手,再建模仿真对标 performance。"}
+
+
+# ────────────────────────── 对标门(Layer 3 闭环的终止判定)──────────────────────────
+
+# 每个指标的默认比较方向 + 单位提示(目标只给数值时用)。
+_TARGET_OP = {
+    "resonant_freq_ghz": "~=", "center_freq_ghz": "~=", "freq_ghz": "~=",
+    "s11_db": "<=", "vswr": "<=", "axial_ratio_db": "<=", "cross_pol_db": "<=",
+    "peak_gain_dbi": ">=", "broadside_gain_dbi": ">=", "bw_pct": ">=", "bw_mhz": ">=",
+    "bw_ghz": ">=", "front_to_back_db": ">=", "hpbw_deg": ">=", "isolation_db": ">=",
+}
+_DEFAULT_TOL_PCT = 2.0   # "~=" 默认容差(目标的百分比)
+
+
+def _check_one(metric, meas, spec):
+    """spec 是标量(用默认 op)或 {op, value, tol/tol_pct}。返回判定 dict。"""
+    if isinstance(spec, dict):
+        op = spec.get("op") or _TARGET_OP.get(metric, "<=")
+        val = spec.get("value")
+        tol_abs = spec.get("tol")
+        tol_pct = spec.get("tol_pct")
+    else:
+        op, val, tol_abs, tol_pct = _TARGET_OP.get(metric, "<="), spec, None, None
+    r = {"metric": metric, "measured": meas, "op": op, "target": val}
+    if meas is None or val is None:
+        r["pass"] = None
+        r["note"] = "缺测量值或目标值,未判定"
+        return r
+    if op in ("~=", "within"):
+        tol = tol_abs if tol_abs is not None else abs(val) * (tol_pct if tol_pct is not None else _DEFAULT_TOL_PCT) / 100.0
+        dev = meas - val
+        r.update({"deviation": round(dev, 4), "tol": round(tol, 4), "pass": abs(dev) <= tol})
+        if val:
+            r["deviation_pct"] = round(dev / val * 100, 2)
+    else:
+        dev = meas - val
+        r["deviation"] = round(dev, 4)
+        r["pass"] = {"<=": meas <= val, "<": meas < val, ">=": meas >= val,
+                     ">": meas > val, "==": meas == val}.get(op, None)
+    return r
+
+
+@tool({"type": "function", "function": {
+    "name": "check_design_targets",
+    "description": ("对标门:把实测指标和目标规格逐项比,给结构化通过/偏差判定(辅助设计闭环的终止条件,也是不达标"
+                    "时该调哪项的依据)。measured/targets 都是 {指标名: 值} —— 自己从 get_s_parameters / "
+                    "get_radiation_pattern 取数填 measured。目标给标量用默认方向(频率~=、s11/vswr/AR<=、"
+                    "增益/带宽/前后比>=);要自定义方向/容差就给 {op, value, tol 或 tol_pct}。"
+                    "常用指标名:resonant_freq_ghz, s11_db, vswr, bw_pct, bw_mhz, peak_gain_dbi, "
+                    "axial_ratio_db, front_to_back_db, hpbw_deg, isolation_db。"),
+    "parameters": {"type": "object", "properties": {
+        "measured": {"type": "object", "description": "实测指标 {名: 数值},如 {'resonant_freq_ghz':2.46,'s11_db':-11.7,'bw_pct':3.5}"},
+        "targets": {"type": "object", "description": "目标规格 {名: 数值 或 {op,value,tol/tol_pct}},如 {'resonant_freq_ghz':2.45,'s11_db':-10,'bw_pct':3}"}},
+        "required": ["measured", "targets"]}}})
+def check_design_targets(ctx, measured, targets):
+    checks = [_check_one(m, measured.get(m), spec) for m, spec in targets.items()]
+    decided = [c for c in checks if c["pass"] is not None]
+    failed = [c["metric"] for c in checks if c["pass"] is False]
+    undecided = [c["metric"] for c in checks if c["pass"] is None]
+    all_pass = bool(decided) and not failed
+    return {"ok": True, "all_pass": all_pass,
+            "n_pass": sum(1 for c in decided if c["pass"]), "n_fail": len(failed),
+            "failed_metrics": failed, "undecided_metrics": undecided, "checks": checks,
+            "hint": ("全部达标。" if all_pass else
+                     f"未达标:{failed}。查设计卡'起手→调匹配'看哪个自由度控这些指标,"
+                     "用 create_parametric_sweep 扫它再 check 一遍。")}
+
