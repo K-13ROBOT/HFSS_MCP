@@ -1,6 +1,8 @@
 # HFSS MCP Server (native / 跨版本版)
 
-放进 Claude Code 后,你用**自然语言**描述天线,Claude 照 `hfss-antenna-modeling` skill 的纪律调本 server 的工具,在 HFSS 里**真的建模、求解、出结果**。
+放进 Claude Code(或任何 MCP 客户端)后,你用**自然语言**描述天线,模型照 `hfss-antenna-modeling` skill 的纪律调本 server 的工具,在 HFSS 里**真的建模、求解、出结果**。
+
+> 本 server 是标准 **MCP stdio server**(官方 `mcp` SDK),协议层不绑任何客户端。下文以 Claude Code 为例;换别的 MCP 客户端见 [用别的 MCP 客户端](#用别的-mcp-客户端)。
 
 **连接全走 win32com 裸调 AEDT 原生脚本 API**(oDesktop/oEditor/oModule),**不依赖 PyAEDT**,因此跨版本——**实测 2019.2 和 2025.2 都通**,适合驱动 PyAEDT/gRPC 够不到的**老版本 HFSS**(如 2019)。
 
@@ -112,16 +114,34 @@ claude mcp add hfss-agent-native --scope user -e HFSS_VERSION="2025.2" -- "C:\..
 
 **工程文件**:默认存到 server 运行目录(cwd)下的 `projects/`,可用环境变量 `HFSS_PROJECTS_DIR` 覆盖。
 
-**跳过确认弹窗**:`analyze` / 参扫 / 优化等阻塞操作默认在终端问 `[y/N]`;要全自动设环境变量 `HFSS_AGENT_AUTOCONFIRM=1`。
+**阻塞操作的确认**:`analyze` / 参扫 / 优化耗时且阻塞。stdio 下进程内的 `[y/N]` 已关(stdin 被协议占用),改由**客户端权限系统**拦——Claude Code 靠 `settings.json` 里的 `ask` 规则(`install.py --project` 已写好 `mcp__hfss-agent-native__analyze`)。别的客户端要靠它自己的工具授权。
 
 **设计卡片目录**(辅助设计检索):`search_designs` 按 `HFSS_DESIGN_DIR` → `~/.claude/skills/.../design/` → bundle 内 `skill/.../design/` 顺序找卡片,一般无需配置。
+
+## 用别的 MCP 客户端
+
+server 是标准 MCP stdio,**任何 MCP 客户端都能挂**(Claude Desktop、Cline、Continue、Cursor、或自写的 MCP agent)。`python install.py` 打印的配置里 `command` / `args` / `env` 三样是通用的,按目标客户端的配置格式填即可:
+
+```jsonc
+{
+  "command": "<python 路径>",          // 装了依赖的那个 python(venv 则用 venv 的)
+  "args": ["<bundle>/hfss_mcp_server.py"],
+  "env": { "HFSS_VERSION": "2025.2", "ANSYSLMD_LICENSE_FILE": "..." }
+}
+```
+
+换客户端会**丢两样 Claude Code 专属能力**,知道就行:
+
+1. **skill 不会自动加载**——`hfss-antenna-modeling` 是 Claude 的 skill 机制,别的客户端不读。工具照样能调,但丢了"怎么正确用"的纪律(坐标/层叠约定、求解前自检、经验库、设计闭环)。
+   - 变通:把本仓库 `skill/hfss-antenna-modeling/SKILL.md`(及 `knowledge/`、`design/`)的内容放进那个 agent 的 system prompt / 上下文当指南。
+2. **确认门**——如上,stdio 下进程内确认已关。客户端若没有工具授权 UI,`analyze`/扫参/优化会**直接跑、不问你**。用支持 MCP 工具授权的客户端,或自己留意别误触。
 
 ## 当前短板
 
 1. **最弱的是"读图/理解复杂结构"那半边,不是建模管线**。折叠/多层/定制馈电这类复杂拓扑,AI 从图反推容易错,仍要靠用户确认结构(skill §0 已尽量兜底)。
 2. `analyze` 阻塞,**暂无 Ctrl+C 中止**。
 3. 经验库还年轻(随用随厚)。
-4. 工具偏多(65),每轮 token 有成本。
+4. 工具偏多(67),每轮 token 有成本。
 
 ## 未来方向
 
