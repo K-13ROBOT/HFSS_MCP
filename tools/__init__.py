@@ -11,11 +11,12 @@ import os
 
 TOOLS = {}
 
-# 不需要 active design 即可调用(会话管理类)
+# 不需要 active design 即可调用(会话管理类 + 设计卡片只读检索)
 NO_HFSS_REQUIRED = {
     "open_desktop", "attach_desktop", "close_desktop", "reset_session",
     "new_project", "activate_project", "list_projects",
     "new_design", "activate_design", "list_designs",
+    "search_designs", "list_design_cards",
 }
 
 # 调用前必须用户确认的工具(阻塞 / 耗资源)。环境变量 HFSS_AGENT_AUTOCONFIRM=1 跳过。
@@ -103,4 +104,4 @@ def dispatch(name, args, ctx):
                     "error": _trace.truncate(err, 200) if err else None, "duration_ms": dt_ms})
 
 
-from . import session, geometry, booleans, transforms, variables, boundaries, excitations, analysis, mesh, planning, parametrics, optimization
+from . import session, geometry, booleans, transforms, variables, boundaries, excitations, analysis, mesh, planning, parametrics, optimization, design

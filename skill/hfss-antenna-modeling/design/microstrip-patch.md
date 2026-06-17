@@ -1,3 +1,19 @@
+---
+topology: microstrip-patch
+aliases: [patch, 贴片, 微带贴片, microstrip]
+freq_ghz_min: 1
+freq_ghz_max: 10
+eps_r: any
+feed: [inset-microstrip, coax-probe]
+polarization: linear
+s11_db: -11.7
+bw_pct_min: 2
+bw_pct_max: 5
+gain_dbi_min: 5
+gain_dbi_max: 7
+source: 本人验证 + Balanis Ch.14
+---
+
 # 矩形微带贴片 设计卡片
 
 > 一句话:最常见的平面单极化天线,窄带(~2–5%),易做、易匹配。给定中心频率 + 基板 → 闭式算出起手 W/L → 扫馈电位置调匹配。

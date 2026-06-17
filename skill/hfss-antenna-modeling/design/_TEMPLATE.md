@@ -1,3 +1,20 @@
+---
+# frontmatter 给 search_designs 检索用(扁平 key: 标量 或 [列表];别嵌套)。值未知就留空/删行。
+topology: <type-slug>
+aliases: [别名, alias]
+freq_ghz_min: 1
+freq_ghz_max: 10
+eps_r: any            # 闭式公式型填 any;经验型填具体数(如 2.2)
+feed: [feed-type]
+polarization: linear  # linear / cp
+s11_db: -11
+bw_pct_min: 2
+bw_pct_max: 5
+gain_dbi_min: 5
+gain_dbi_max: 7
+source: 出处
+---
+
 # <拓扑名> 设计卡片(模板)
 
 > 复制本文件成 `<type>.md` 来新建一张卡。**设计卡 = 正向设计的"数据"**:给指标 → 查这张卡 → 起手尺寸 → 仿真对标。

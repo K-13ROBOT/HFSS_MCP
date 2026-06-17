@@ -56,7 +56,7 @@ description: >-
 旁边还有个 **`design/` 目录**(与 `knowledge/` 同级),按天线类型存**设计卡片**:λ 归一化尺寸 / 闭式公式 + 设计自由度 + 报告性能 + 出处。与 `knowledge/` 分工明确:**`design/` 是"数据"(正向设计起手),`knowledge/` 是"经验"(排错机理)**。
 
 **何时用**:用户给的是**指标/目标**(频率、基板、增益/带宽要求、或"参考某结构设计一个")而非现成尺寸时——这是**设计**任务,不是单纯复现。
-1. 认出天线类型 → 读 `design/INDEX.md` → 读对应 `design/<type>.md`,用闭式公式/归一化尺寸**缩放到目标频率**算出起手尺寸。
+1. 调 **`search_designs`**(传 frequency_ghz/polarization/topology/min_gain_dbi 等)检索匹配卡片(或 `list_design_cards` 列全部)→ 对返回的 `path` 用 `Read` 看闭式公式/归一化尺寸,**缩放到目标频率**算出起手尺寸。
 2. 据此建模、求解,用 `get_s_parameters`/`get_radiation_pattern` 跟卡片"报告性能"**对标报偏差**;不达标用参数扫描(§8)自动调。
 3. 建模/调试细节配合读 `knowledge/<type>.md`(机理与坑)。
 
