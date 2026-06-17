@@ -30,36 +30,96 @@
 ## 已验证
 
 - **跨版本**:连接 + 建模在 2019.2 + 2025.2 双版本通。
-- **全 61 工具**在 2019.2 实测(含最难的参扫结果提取)。
+- **建模/求解/参扫的核心工具**在 2019.2 实测(含最难的参扫结果提取);辅助设计 3 个工具(`search_designs`/`list_design_cards`/`check_design_targets`)为纯本地逻辑、单测通过。
 - **整条管线产出过一个正确匹配的天线**(探针贴片:S11 −11.7dB / VSWR 1.7 / Zin~50Ω,自洽)——"建+求解"这半边已坐实。
 
-## 前置 & 安装
+## 前置要求
 
-- 本机装好目标版本 HFSS(2019.2 / 2025.2 …),license 可用。
-- 装依赖(**很轻,不要 pyaedt**):
-  ```powershell
-  python -m pip install -r requirements.txt    # mcp + pywin32
-  ```
-- 注册:
-  ```powershell
-  python install.py              # 看配置
-  python install.py --skill-user # skill 装到 ~/.claude/skills/,再按打印的 claude mcp add 注册
-  python install.py --project D:\path\to\project   # 只给某项目
-  ```
-- 重启 Claude Code,`/mcp` 看到 `hfss-agent-native`。
+- **操作系统:Windows**。连接全走 win32com(pywin32),**仅 Windows**,Linux/macOS 不支持。
+- **HFSS / Ansys Electronics Desktop**:本机装好目标版本(实测 2019.2、2025.2),license 可用、能正常手动启动。
+- **Python 3.10+**(`mcp` 要求);建议用虚拟环境(理由见下)。
+- **Claude Code** 已安装(`claude` CLI 在 PATH 里);或其它支持 MCP stdio 的客户端。
 
-## 用
+## 安装
 
-默认连 `HFSS_VERSION`(install 推导的最高版本)。**要连老版本**:对话里让 `open_desktop` 传 `version="2019.2"`,或改 `.mcp.json` env 里的 `HFSS_VERSION`。
+### 1. 取代码 + 装依赖
 
-自检(不启 HFSS):`python smoke_mcp.py` → 看到 `SMOKE OK`。
+```powershell
+git clone https://github.com/K-13ROBOT/HFSS_MCP.git
+cd HFSS_MCP
+
+# 建议建虚拟环境
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+
+python -m pip install -r requirements.txt    # 只装 mcp + pywin32,不要 pyaedt
+```
+
+> ⚠️ **关键**:`install.py` 会把"**当前正在跑它的那个 python 的绝对路径**"写进 MCP 配置当启动命令。所以**用哪个 python 装依赖、跑 install.py,server 以后就用哪个**。用了 venv,就在 venv 激活状态下跑后面所有 `python ...` 命令。
+
+### 2. 自检(不启 HFSS)
+
+```powershell
+python smoke_mcp.py        # 看到 SMOKE OK = 依赖装好、工具能注册
+```
+
+### 3. 注册给 Claude Code
+
+先**预览**将写入的配置(不动任何文件):
+
+```powershell
+python install.py
+```
+
+它会打印 ① 一段 `.mcp.json` ② 一条 `claude mcp add` 命令 ③ 推导出的 env。按使用范围二选一:
+
+**方式 A — 只给某个项目(建议先用这个)**
+
+```powershell
+python install.py --project D:\path\to\your\project
+```
+
+一条命令写好三样(已存在则合并,不覆盖):
+- `<项目>\.mcp.json` ← MCP server 注册(项目级)
+- `<项目>\.claude\skills\hfss-antenna-modeling\` ← skill(含 knowledge/ 经验库 + design/ 设计卡片库)
+- `<项目>\.claude\settings.json` ← 给 `analyze` 加"执行前确认"(防误触阻塞操作)
+
+**方式 B — 全局(所有项目可用)**
+
+```powershell
+python install.py --skill-user      # ① 把 skill 装到 ~/.claude/skills/
+```
+然后**复制运行上一步打印的那条 `claude mcp add` 命令**注册 server,形如:
+```powershell
+claude mcp add hfss-agent-native --scope user -e HFSS_VERSION="2025.2" -- "C:\...\.venv\Scripts\python.exe" "C:\...\HFSS_MCP\hfss_mcp_server.py"
+```
+
+> 本脚本**绝不改全局 `~/.claude.json`**;全局 MCP 注册一律靠那条 `claude mcp add`(你能看清到底写了什么)。
+
+### 4. 生效 + 验证
+
+1. **重启 Claude Code**(改了 MCP 配置必须重启才加载)。
+2. `/mcp` 应看到 **`hfss-agent-native`**。
+3. 直接说一句"用 HFSS 建一个 2.45GHz 微带贴片并跑 S11",Claude 会自动走 `hfss-antenna-modeling` skill 调工具建模、求解、出结果。
+
+## 配置 & 用法
+
+**连哪个版本**:默认连 env 里的 `HFSS_VERSION`(`install.py` 从最高的 `ANSYSEM_ROOT###` 环境变量推导;推导不到则默认 `2025.2`)。**要连老版本(如 2019.2)**:对话里让 `open_desktop` 传 `version="2019.2"`,或改 `.mcp.json` env 里的 `HFSS_VERSION`。
+
+**license**:`install.py` 会把本机的 `ANSYSLMD_LICENSE_FILE` / `ANSYSLIC_DIR`(若有)带进 server env;缺了就按你平时启动 HFSS 的方式补进 env 块。
+
+**工程文件**:默认存到 server 运行目录(cwd)下的 `projects/`,可用环境变量 `HFSS_PROJECTS_DIR` 覆盖。
+
+**跳过确认弹窗**:`analyze` / 参扫 / 优化等阻塞操作默认在终端问 `[y/N]`;要全自动设环境变量 `HFSS_AGENT_AUTOCONFIRM=1`。
+
+**设计卡片目录**(辅助设计检索):`search_designs` 按 `HFSS_DESIGN_DIR` → `~/.claude/skills/.../design/` → bundle 内 `skill/.../design/` 顺序找卡片,一般无需配置。
 
 ## 当前短板
 
 1. **最弱的是"读图/理解复杂结构"那半边,不是建模管线**。折叠/多层/定制馈电这类复杂拓扑,AI 从图反推容易错,仍要靠用户确认结构(skill §0 已尽量兜底)。
 2. `analyze` 阻塞,**暂无 Ctrl+C 中止**。
 3. 经验库还年轻(随用随厚)。
-4. 工具偏多(62),每轮 token 有成本。
+4. 工具偏多(65),每轮 token 有成本。
 
 ## 未来方向
 
