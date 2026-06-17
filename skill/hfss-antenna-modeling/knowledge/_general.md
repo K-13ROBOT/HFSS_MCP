@@ -26,3 +26,8 @@
 ## 端口积分线坐标可用变量名
 - 现象:旧认知里端口坐标必须字面量,变量会崩。
 - 解法:`create_edge_feed_port`/`create_lumped_port` 现在内部会把变量名解析成字面量,可直接传 `'subH'`。但**复杂表达式**(如 `'subH/2'`)解析不了,拿不准写字面量。`create_coax_feed_port` 例外:feed_x/y/radius 仍须字面量。
+- 补充:**取负的裸变量也算复杂表达式**(如 `feed_y='-Lf'`)——会在 AssignLumpedPort 阶段崩(`com_error 发生意外`),用字面量(`'-4.8mm'`)。
+
+## 端口创建半途失败会留孤儿 sheet,要清
+- 现象:`create_edge_feed_port` 报 AssignLumpedPort 失败,但 sheet 已经建出来了;重试又建一个,`design_summary` 里出现 `P1_sheet` + `P1_sheet_1` 两个同位置 sheet,只有一个挂着端口。
+- 解法:别凭名字顺序猜哪个是孤儿(实测端口可能挂在先建的那个上)。把两个 sheet 都 `delete_object` 删掉,再干净地 `create_edge_feed_port` 重建一次;删后 `design_summary` 看 excitations 确认端口在。
