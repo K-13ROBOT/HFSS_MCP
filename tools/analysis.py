@@ -84,12 +84,19 @@ def create_setup(ctx, name, frequency, max_passes=10, max_delta_s=0.02):
                 "num_points": {"type": "integer", "default": 401, "description": "点数,默认 401"},
                 "sweep_type": {"type": "string", "enum": ["Interpolating", "Discrete", "Fast"],
                                "default": "Interpolating"},
+                "save_rad_fields": {"type": "boolean", "default": False,
+                                    "description": "保存辐射场(理论上比 save_fields 省盘)。**实测 2025.2 上单独设它不生效**"
+                                                   "——S 参数有解但远场报告报 com_error。要在扫频上取远场量"
+                                                   "(增益/轴比 vs 频率,如 get_axial_ratio)请改传 save_fields=True。"},
+                "save_fields": {"type": "boolean", "default": False,
+                                "description": "保存完整场(很占盘)。只看 S 参数/远场时不需要。"},
             },
             "required": ["setup", "name", "start_frequency", "stop_frequency"],
         },
     },
 })
-def create_sweep(ctx, setup, name, start_frequency, stop_frequency, num_points=401, sweep_type="Interpolating"):
+def create_sweep(ctx, setup, name, start_frequency, stop_frequency, num_points=401,
+                 sweep_type="Interpolating", save_rad_fields=False, save_fields=False):
     oDesign = ctx["oDesign"]
     try:
         oModule = oDesign.GetModule("AnalysisSetup")
@@ -101,8 +108,8 @@ def create_sweep(ctx, setup, name, start_frequency, stop_frequency, num_points=4
              "RangeEnd:=", _to_unit_str(stop_frequency),
              "RangeCount:=", int(num_points),
              "Type:=", sweep_type,
-             "SaveFields:=", False,
-             "SaveRadFields:=", False,
+             "SaveFields:=", bool(save_fields),
+             "SaveRadFields:=", bool(save_rad_fields or save_fields),
              "InterpTolerance:=", 0.5,
              "InterpMaxSolns:=", 250,
              "InterpMinSolns:=", 0,
@@ -114,7 +121,10 @@ def create_sweep(ctx, setup, name, start_frequency, stop_frequency, num_points=4
         ctx["state"].setups.setdefault(setup, {}).setdefault("sweeps", []).append(
             {"name": name, "start": start_frequency, "stop": stop_frequency})
     return {"ok": True, "name": name, "setup": setup,
-            "range": [start_frequency, stop_frequency], "points": num_points}
+            "range": [start_frequency, stop_frequency], "points": num_points,
+            "sweep_type": sweep_type,
+            "save_rad_fields": bool(save_rad_fields or save_fields),
+            "save_fields": bool(save_fields)}
 
 
 @tool({
