@@ -428,3 +428,29 @@ def close_desktop(ctx, save=False):
         return {"ok": False, "error": f"关闭 desktop 出错: {e},但状态已清空"}
     _clear(ctx)
     return {"ok": True}
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "save_project",
+        "description": ("保存当前工程到磁盘(不关闭 HFSS)。用户说'保存/存盘'时调用;"
+                        "重启 MCP server、长时间求解前、或阶段性成果落地时也应主动存一次。"),
+        "parameters": {"type": "object", "properties": {}},
+    },
+})
+def save_project(ctx):
+    oProject = ctx.get("oProject")
+    if oProject is None:
+        return {"ok": False, "error": "当前没有 active project"}
+    try:
+        oProject.Save()
+    except Exception as e:
+        return {"ok": False, "error": "保存失败: %s: %s" % (type(e).__name__, e)}
+    name = ctx.get("project_name")
+    out = {"ok": True, "project": name}
+    try:
+        out["path"] = oProject.GetPath()
+    except Exception:
+        pass
+    return out
