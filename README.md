@@ -11,17 +11,17 @@
 - 连接 = `win32com.Dispatch("Ansoft.ElectronicsDesktop." + version)`(ProgID 每个装机版本都注册),不卡 PyAEDT 版本下限,也不依赖 gRPC(2022R2+ 才有)。
 - 操作 = AEDT 原生脚本 API(宏录制那套),自 ~v15 稳定。
 
-## 能做什么(66 个工具)
+## 能做什么(69 个工具)
 
 | 域 | 能力 |
 |---|---|
-| **会话** | open/attach/close、新建工程与设计、**从路径打开已有 .aedt**、切换/列举、reset |
+| **会话** | open/attach/close、新建工程与设计、**从路径打开已有 .aedt**、切换/列举、保存工程、reset |
 | **几何** | box/rectangle/cylinder/sphere/polyline、布尔(并/减/交)、变换(移动/旋转/镜像/线阵·环阵复制)、变量驱动、材料(含**自定义 εr/tanδ**)、delete |
 | **自检** | `get_object_bbox`(看层叠/搭接)、`design_summary`、list_objects/variables |
 | **边界** | Perfect E / Perfect H / 有限电导率 / 阻抗面 / 集总 RLC、开放辐射边界、远场球 |
-| **馈电** | 集总端口、边馈/微带(一步)、同轴探针(一步)——均验证能产出**真匹配** |
+| **馈电** | 集总端口、边馈/微带(一步)、同轴探针(一步)——均验证能产出**真匹配**;**端口幅度/相位**(双馈 CP 90°、差分 180°、相控阵扫描) |
 | **周期单元** | 主从(Master/Slave)边界 + Floquet 端口(一步,晶格矢量自动推)——无限阵/FSS/超表面单元仿真,带扫描角 |
-| **求解 & 结果** | setup + 扫频 + analyze;S11/谐振/-10dB 带宽、**VSWR + 输入阻抗 Zin**、**远场方向图** |
+| **求解 & 结果** | setup + 扫频 + analyze;S11/谐振/-10dB 带宽、**VSWR + 输入阻抗 Zin**、**远场方向图**、**轴比 AR vs 频率 + 3dB 轴比带宽** |
 | **参数扫描** | 一次解全部组合 + 6 指标提取:S11 / 增益 / 轴比 / 前后比 / HPBW / 交叉极化隔离 |
 | **优化** | HFSS 内置优化器(自动迭代逼近目标) |
 | **辅助设计** | `search_designs` / `list_design_cards`——按指标检索 `skill/.../design/` 设计卡片拿起手尺寸;`check_design_targets`——实测 vs 目标逐项对标判定(指标驱动设计闭环的终止门) |
