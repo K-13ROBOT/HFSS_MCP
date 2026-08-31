@@ -17,6 +17,7 @@ NO_HFSS_REQUIRED = {
     "new_project", "open_project", "activate_project", "list_projects",
     "new_design", "activate_design", "list_designs",
     "search_designs", "list_design_cards", "check_design_targets",
+    "get_messages",   # 消息窗口:design 坏掉/没建起来时最需要读它,不能被 active design 挡住
 }
 
 # 调用前必须用户确认的工具(阻塞 / 耗资源)。环境变量 HFSS_AGENT_AUTOCONFIRM=1 跳过。
@@ -104,4 +105,4 @@ def dispatch(name, args, ctx):
                     "error": _trace.truncate(err, 200) if err else None, "duration_ms": dt_ms})
 
 
-from . import session, geometry, booleans, transforms, variables, boundaries, excitations, analysis, mesh, parametrics, optimization, design, periodic, axialratio, sources
+from . import session, geometry, booleans, transforms, variables, boundaries, excitations, analysis, mesh, parametrics, optimization, design, periodic, axialratio, sources, diagnostics
