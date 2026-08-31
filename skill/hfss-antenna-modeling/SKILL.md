@@ -156,8 +156,11 @@ description: >-
    - 没有该分离的对象 z 范围重叠(穿模)
    - 发现不对 → `delete_object` 改正后重建,**绝不带着错几何 analyze**(那是又错又慢的根源)
 7. `create_setup`(频率取工作频率)→ `create_sweep`(覆盖工作频率)
-8. `analyze` 跑求解(阻塞)
-9. 取结果:`get_s_parameters` 拿 S11/谐振/-10dB 带宽;`get_input_metrics` 拿 **VSWR + 输入阻抗 Zin(R+jX) + VSWR<2 带宽(含中心频率/分数带宽%)**——要看匹配好不好、阻抗实不实在 50Ω 时用它
+8. **【HFSS 自检 —— analyze 前必做,治"配置漏"】** 调 `validate_design` 跑 HFSS 自带的 Validation Check:端口缺积分线、setup 没绑激励、边界重叠、材料缺失——30 秒查出来,省得求解 10 分钟后才发现白跑。`passed=false` 先修完再往下。**与第 6 步分工**:bbox 查**几何**建歪没(我们自己的自检),这步查 **HFSS 认不认**这个 design。
+   - 判定以 HFSS 返回码为准。**老版本(2019.2 实测)消息窗口写入滞后可达几十秒**,所以 `passed=false` 但 `errors` 为空是正常的——过一会儿调 `get_messages` 才看得到"错在哪"(2025.2 是即时的)。
+9. `analyze` 跑求解(阻塞)
+10. **【求解后先读消息窗口】** 调 `get_messages`(默认只回当前工程/design,`errors_only=true` 省 context)。COM 只反映"调用失败",而端口阻抗偏离归一化值、自适应不收敛、材料/边界的抱怨**只写在消息窗口里**——"跑通了但数不对"时先读它,别上来就改几何。
+11. 取结果:`get_s_parameters` 拿 S11/谐振/-10dB 带宽;`get_input_metrics` 拿 **VSWR + 输入阻抗 Zin(R+jX) + VSWR<2 带宽(含中心频率/分数带宽%)**——要看匹配好不好、阻抗实不实在 50Ω 时用它
 
 ## 6.5 非标准馈电(通用做法)
 馈电方式千变万化,只有上面两类(边缘/微带、同轴探针)有一步工具。其余一律用基本图元手搭,套路一致:

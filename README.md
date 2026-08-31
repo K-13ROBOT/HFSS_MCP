@@ -6,18 +6,20 @@
 
 **连接全走 win32com 裸调 AEDT 原生脚本 API**(oDesktop/oEditor/oModule),**不依赖 PyAEDT**,因此跨版本——**实测 2019.2 和 2025.2 都通**,适合驱动 PyAEDT/gRPC 够不到的**老版本 HFSS**(如 2019)。
 
+**目录**:[为什么能跨版本](#为什么能跨版本) · [能做什么](#能做什么71-个工具) · [已验证](#已验证) · [安装](#安装) · [配置 & 用法](#配置--用法) · [用别的 MCP 客户端](#用别的-mcp-客户端) · [代码结构](#代码结构) · [当前短板](#当前短板) · [跨版本已知差异](#跨版本已知差异)
+
 ## 为什么能跨版本
 
 - 连接 = `win32com.Dispatch("Ansoft.ElectronicsDesktop." + version)`(ProgID 每个装机版本都注册),不卡 PyAEDT 版本下限,也不依赖 gRPC(2022R2+ 才有)。
 - 操作 = AEDT 原生脚本 API(宏录制那套),自 ~v15 稳定。
 
-## 能做什么(69 个工具)
+## 能做什么(71 个工具)
 
 | 域 | 能力 |
 |---|---|
 | **会话** | open/attach/close、新建工程与设计、**从路径打开已有 .aedt**、切换/列举、保存工程、reset |
 | **几何** | box/rectangle/cylinder/sphere/polyline、布尔(并/减/交)、变换(移动/旋转/镜像/线阵·环阵复制)、变量驱动、材料(含**自定义 εr/tanδ**)、delete |
-| **自检** | `get_object_bbox`(看层叠/搭接)、`design_summary`、list_objects/variables |
+| **自检 & 诊断** | `get_object_bbox`(看层叠/搭接)、`design_summary`、list_objects/variables;**`validate_design`**(HFSS 自带 Validation Check,analyze 前挡配置漏)、**`get_messages`**(读消息窗口——"跑通了但数不对"的第一手线索) |
 | **边界** | Perfect E / Perfect H / 有限电导率 / 阻抗面 / 集总 RLC、开放辐射边界、远场球 |
 | **馈电** | 集总端口、边馈/微带(一步)、同轴探针(一步)——均验证能产出**真匹配**;**端口幅度/相位**(双馈 CP 90°、差分 180°、相控阵扫描) |
 | **周期单元** | 主从(Master/Slave)边界 + Floquet 端口(一步,晶格矢量自动推)——无限阵/FSS/超表面单元仿真,带扫描角 |
@@ -34,6 +36,7 @@
 
 - **跨版本**:连接 + 建模在 2019.2 + 2025.2 双版本通。
 - **建模/求解/参扫的核心工具**在 2019.2 实测(含最难的参扫结果提取);辅助设计 3 个工具(`search_designs`/`list_design_cards`/`check_design_targets`)为纯本地逻辑、单测通过。
+- **诊断工具**(`validate_design` / `get_messages`)在 2019.2 + 2025.2 双版本实测:坏 design(无激励 / 材料没设 solve inside)判 `passed=false`,好 design 判 `passed=true`;两版的返回码类型与消息延迟差异已在代码里兜住(见[跨版本已知差异](#跨版本已知差异))。
 - **周期单元工具**(主从边界 + Floquet 端口)按 AEDT 脚本 API 实现、参数构造离线核对通过,但**COM 行为尚未逐版本真机回归**——首次用请盯结果。
 - **整条管线产出过一个正确匹配的天线**(探针贴片:S11 −11.7dB / VSWR 1.7 / Zin~50Ω,自洽)——"建+求解"这半边已坐实。
 
@@ -136,12 +139,29 @@ server 是标准 MCP stdio,**任何 MCP 客户端都能挂**(Claude Desktop、Cl
    - 变通:把本仓库 `skill/hfss-antenna-modeling/SKILL.md`(及 `knowledge/`、`design/`)的内容放进那个 agent 的 system prompt / 上下文当指南。
 2. **确认门**——如上,stdio 下进程内确认已关。客户端若没有工具授权 UI,`analyze`/扫参/优化会**直接跑、不问你**。用支持 MCP 工具授权的客户端,或自己留意别误触。
 
+## 代码结构
+
+```
+hfss_mcp_server.py   MCP stdio 入口:常驻 ctx 持有 COM 句柄(oDesktop/oProject/oDesign/oEditor)
+tools/__init__.py    工具注册表(@tool 装饰器)+ dispatch:前置校验、确认门、trace 落盘
+tools/*.py           按域分文件:session / geometry / booleans / transforms / variables /
+                     boundaries / excitations / sources / analysis / axialratio / mesh /
+                     parametrics / optimization / periodic / diagnostics / design
+model_state.py       Agent 侧的模型状态镜像(对象/变量/边界/激励/setup),供 design_summary 等用
+install.py           打印/写入 MCP 配置 + 安装 skill(不改全局 ~/.claude.json)
+smoke_mcp.py         不启 HFSS 的 stdio 冒烟:工具能否注册、协议往返是否干净
+skill/hfss-antenna-modeling/
+    SKILL.md         建模纪律(坐标/层叠约定、求解前自检、馈电/扫参/优化套路、设计闭环)
+    knowledge/       排错经验库(按天线类型,随用变厚)
+    design/          设计卡片库(λ 归一化尺寸/闭式公式,供 search_designs 检索)
+```
+
 ## 当前短板
 
 1. **最弱的是"读图/理解复杂结构"那半边,不是建模管线**。折叠/多层/定制馈电这类复杂拓扑,AI 从图反推容易错,仍要靠用户确认结构(skill §0 已尽量兜底)。
 2. `analyze` 阻塞,**暂无 Ctrl+C 中止**。
 3. 经验库还年轻(随用随厚)。
-4. 工具偏多(66),每轮 token 有成本。
+4. 工具偏多,每轮 token 有成本(数量见[能做什么](#能做什么71-个工具)那张表)。
 
 ## 未来方向
 
@@ -149,9 +169,29 @@ server 是标准 MCP stdio,**任何 MCP 客户端都能挂**(Claude Desktop、Cl
 - **中期(补能力)**:更多馈电/结构类型、场图/电流分布导出、工具按需收敛降 token。
 - **远期愿景(设计顾问)**:从"照着建"进化到"参考文献辅助设计"——给指标/参考论文,它建议结构+尺寸并实现、仿真、迭代到达标;底层靠 λ 归一化设计卡片库 + 经验库。
 
-## 已知点
+## 跨版本已知差异
+
+真机实测踩出来的坑,**都已在工具内兜底**,列在这里是为了别被"优化"回去:
+
+| 项 | 2019.2 | 2025.2 | 兜底做法 |
+|---|---|---|---|
+| `CreateReport` 参数个数 | 8 参 | 7 参 | 多形式挨个试,谁不抛用谁 |
+| 远场球方法名 | `InsertFarFieldSphereSetup` | `InsertInfiniteSphereSetup` | 两个都试 |
+| `ValidateDesign()` 返回码 | `int`(坏 0 / 好 1) | `bool`(坏 False / 好 True) | `bool()` 统一,假=失败 |
+| 消息窗口写入 | **滞后可达几十秒** | 即时 | 判定以返回码为主,消息只说明"错在哪" |
+| `GetMessages` 的 severity 参数 | — | **0/1/2 结果相同,不起作用** | 级别自己从 `[error]`/`[warning]` 标记解析 |
+| 扫频存远场 | — | **单设 `SaveRadFields` 不生效** | 取 AR/增益 vs 频率要 `Discrete` + `save_fields=True` |
+
+另有两条与版本无关、但同样反直觉:
+
+- **`CreateRectangle` 的 XZ 平面 Width/Height 轴向与直觉相反**(WhichAxis=Y 时 Width→Z、Height→X),已在 `create_rectangle` 内修正。
+- **端口积分线不能直接放变量名**(老版本会崩),工具会自动解析成字面量(同轴端口除外,要求本来就传字面量)。
+
+## 其它已知点
 
 - server 名 **`hfss-agent-native`** 写死(settings 的 `mcp__hfss-agent-native__analyze` 确认规则 key 在它上)。
 - 工程存到运行目录 cwd 下 `projects/`(可 `HFSS_PROJECTS_DIR` 覆盖)。
-- **CreateReport 跨版本 arity 不同**(2019=8 参,2025=7 参),结果提取已用多形式兜底。
-- **CreateRectangle 的 XZ 平面 Width/Height 轴向**与直觉相反(已在工具内修正);**端口积分线**变量名会自动解析成字面量(同轴除外)。
+
+## License
+
+MIT,见 [LICENSE](LICENSE)。
