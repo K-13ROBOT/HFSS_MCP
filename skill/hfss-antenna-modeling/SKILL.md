@@ -56,7 +56,7 @@ description: >-
 旁边还有个 **`design/` 目录**(与 `knowledge/` 同级),按天线类型存**设计卡片**:λ 归一化尺寸 / 闭式公式 + 设计自由度 + 报告性能 + 出处。与 `knowledge/` 分工明确:**`design/` 是"数据"(正向设计起手),`knowledge/` 是"经验"(排错机理)**。
 
 **何时用**:用户给的是**指标/目标**(频率、基板、增益/带宽要求、或"参考某结构设计一个")而非现成尺寸时——这是**设计**任务,不是单纯复现。
-1. 调 **`search_designs`**(传 frequency_ghz/polarization/topology/min_gain_dbi 等)检索匹配卡片(或 `list_design_cards` 列全部)→ 对返回的 `path` 用 `Read` 看闭式公式/归一化尺寸,**缩放到目标频率**算出起手尺寸。
+1. 调 **`search_designs`**(传 frequency_ghz/polarization/topology/min_gain_dbi 等)检索匹配卡片(或 `list_design_cards` 列全部)→ 用 **`read_design_card(card=...)`** 取卡片正文看闭式公式/归一化尺寸,**缩放到目标频率**算出起手尺寸。
 2. 据此建模、求解,用 `get_s_parameters`/`get_radiation_pattern` 跟卡片"报告性能"**对标报偏差**;不达标用参数扫描(§8)自动调。
 3. 建模/调试细节配合读 `knowledge/<type>.md`(机理与坑)。
 
@@ -218,7 +218,7 @@ get_parametric_* 异常(只 1 个 variation、字段全空)时先让用户排查
 ## 10. 指标驱动设计闭环(用户给的是"目标/规格",不是现成尺寸)
 当任务是"设计一个 X GHz、S11<−10dB、增益≥Y 的天线"或"参考某结构设计一个"——即**正向设计**而非照尺寸复现时,走这条闭环(配合 §0.3 设计卡片库):
 
-1. **检索起手**:`search_designs`(传 frequency_ghz/polarization/topology/min_gain_dbi)找匹配卡 → `Read` 卡的 `path` 看闭式公式 / λ 归一化尺寸。没有匹配卡就退回常规建模 + 收工时新建卡。
+1. **检索起手**:`search_designs`(传 frequency_ghz/polarization/topology/min_gain_dbi)找匹配卡 → `read_design_card` 取正文看闭式公式 / λ 归一化尺寸。没有匹配卡就退回常规建模 + 收工时新建卡。
 2. **缩放**:用卡里的**闭式公式**(优先)或 **λ₀ 归一化常数**算到目标频率/基板的起手尺寸(尺寸 ∝ 1/f;换 εr 必须重算 εeff)。`set_variable` 落成变量再建几何。
 3. **搭建 + 求解**:按 §3.5 坐标层叠、§5 sheet 规则、§6 求解流程建模并 `analyze`。
 4. **对标门**:从 `get_s_parameters` / `get_radiation_pattern` 取实测,调 **`check_design_targets`**(measured + targets)拿结构化判定。**这是闭环的客观终止条件,别靠眼估说"差不多达标"。**

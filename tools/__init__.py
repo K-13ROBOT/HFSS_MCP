@@ -16,8 +16,14 @@ NO_HFSS_REQUIRED = {
     "open_desktop", "attach_desktop", "close_desktop", "reset_session",
     "new_project", "open_project", "activate_project", "list_projects",
     "new_design", "activate_design", "list_designs",
-    "search_designs", "list_design_cards", "check_design_targets",
+    "search_designs", "list_design_cards", "read_design_card", "check_design_targets",
     "get_messages",   # 消息窗口:design 坏掉/没建起来时最需要读它,不能被 active design 挡住
+}
+
+# 完全不碰 COM 的工具(纯本地文件/计算)。这些不必排进 COM 单线程队列——
+# 否则 analyze 跑 20 分钟期间,连查张设计卡片都要等 20 分钟。
+NO_COM_REQUIRED = {
+    "search_designs", "list_design_cards", "read_design_card", "check_design_targets",
 }
 
 # 调用前必须用户确认的工具(阻塞 / 耗资源)。环境变量 HFSS_AGENT_AUTOCONFIRM=1 跳过。

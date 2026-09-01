@@ -82,7 +82,7 @@ def _as_list(x):
 
 @tool({"type": "function", "function": {
     "name": "list_design_cards",
-    "description": "列出设计卡片库里所有卡(辅助设计用)。返回每张卡的拓扑/频段/基板/馈电/极化/报告性能摘要 + 文件路径(用 Read 看公式细节)。",
+    "description": "列出设计卡片库里所有卡(辅助设计用)。返回每张卡的拓扑/频段/基板/馈电/极化/报告性能摘要 + 卡片名(用 read_design_card 看公式细节)。",
     "parameters": {"type": "object", "properties": {}}}})
 def list_design_cards(ctx):
     d, cands = _design_dir()
@@ -99,9 +99,41 @@ def list_design_cards(ctx):
 
 
 @tool({"type": "function", "function": {
+    "name": "read_design_card",
+    "description": ("读一张设计卡片的完整正文(闭式公式 / λ 归一化尺寸 / 设计自由度 / 出处)。"
+                    "search_designs / list_design_cards 命中后用它拿细节,再按目标频率缩放算起手尺寸。"
+                    "**卡片内容通过本工具返回,不需要客户端自带文件读取能力。**"),
+    "parameters": {"type": "object", "properties": {
+        "card": {"type": "string", "description": "卡片名(不含 .md),取自 search_designs/list_design_cards 返回的 card 字段"},
+        "max_chars": {"type": "integer", "default": 20000,
+                      "description": "最多返回多少字符,默认 20000;超长会截断并标注 truncated"}},
+        "required": ["card"]}}})
+def read_design_card(ctx, card, max_chars=20000):
+    d, cands = _design_dir()
+    if not d:
+        return {"ok": False, "error": "找不到设计卡片目录", "searched": cands}
+    # 只认卡片库里已登记的卡名,不接受路径——避免把任意文件读出去
+    cards = {c["card"]: c for c in _load_cards(d)}
+    hit = cards.get(str(card).strip()) or cards.get(str(card).strip().removesuffix(".md"))
+    if hit is None:
+        return {"ok": False, "error": f"没有名为 '{card}' 的设计卡",
+                "available": sorted(cards.keys())}
+    try:
+        with open(hit["path"], "r", encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except Exception as e:
+        return {"ok": False, "error": f"读卡片失败: {type(e).__name__}: {e}"}
+    n = int(max_chars)
+    truncated = len(text) > n
+    return {"ok": True, "card": hit["card"], "path": hit["path"], "fm": hit["fm"],
+            "n_chars": len(text), "truncated": truncated,
+            "content": text[:n] + ("  …(已截断,调大 max_chars 看全文)" if truncated else "")}
+
+
+@tool({"type": "function", "function": {
     "name": "search_designs",
     "description": ("按需求检索设计卡片(辅助设计起手)。给频率/极化/拓扑/增益等条件,返回匹配的卡及其报告性能、"
-                    "λ归一化尺寸/公式所在文件路径(用 Read 看细节,再按目标频率缩放起手建模)。"
+                    "λ归一化尺寸/公式所在卡片名(用 read_design_card 取正文,再按目标频率缩放起手建模)。"
                     "不传任何条件=返回全部。缺对应元数据的卡不因该条件被排除(从宽,标注 unknown)。"),
     "parameters": {"type": "object", "properties": {
         "frequency_ghz": {"type": "number", "description": "目标工作频率(GHz),匹配频段覆盖它的卡"},
@@ -176,7 +208,7 @@ def search_designs(ctx, frequency_ghz=None, polarization=None, topology=None, mi
                             "gain_dbi": [fm.get("gain_dbi_min"), fm.get("gain_dbi_max")]},
             "source": fm.get("source"), "matched": why})
     return {"ok": True, "dir": d, "n_matches": len(out), "matches": out,
-            "hint": "用 Read 打开匹配卡的 path 看闭式公式/归一化尺寸,按 frequency_ghz 缩放算起手,再建模仿真对标 performance。"}
+            "hint": "用 read_design_card(card=...) 取闭式公式/归一化尺寸,按 frequency_ghz 缩放算起手,再建模仿真对标 performance。"}
 
 
 # ────────────────────────── 对标门(Layer 3 闭环的终止判定)──────────────────────────
