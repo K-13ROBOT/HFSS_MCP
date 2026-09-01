@@ -14,6 +14,7 @@
 
 import json
 import os
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -21,21 +22,31 @@ from pathlib import Path
 _TRACE_DIR = Path("./traces")
 _session_path: Path | None = None
 _turn_id = 0
+# COM 工具跑在专用线程、NO_COM_REQUIRED 工具跑在事件循环上,两边都会 log ——
+# 串行时代不需要锁,现在需要,否则两条 JSON line 可能交错成一行坏数据。
+_write_lock = threading.Lock()
 
 
 def init_session(model: str) -> Path | None:
     """REPL 启动时调一次,创建当次 session 的 jsonl 文件。"""
     global _session_path
-    try:
-        _TRACE_DIR.mkdir(exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        _session_path = _TRACE_DIR / f"session-{ts}.jsonl"
-        log({"type": "session_start", "model": model, "pid": os.getpid()})
-        return _session_path
-    except Exception as e:
-        print(f"[trace] init 失败,本次会话无追踪日志: {e}")
-        _session_path = None
-        return None
+    # cwd 由 MCP 客户端决定,可能不可写(见 tools/session.py 同款兜底)——依次退到用户目录/临时目录,
+    # 都不行才放弃追踪。追踪没了不影响主流程,但能保留就保留。
+    import tempfile
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    cands = [_TRACE_DIR,
+             Path(os.path.expanduser("~")) / ".hfss-agent" / "traces",
+             Path(tempfile.gettempdir()) / "hfss-agent" / "traces"]
+    for d in cands:
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            _session_path = d / f"session-{ts}.jsonl"
+            log({"type": "session_start", "model": model, "pid": os.getpid()})
+            return _session_path
+        except Exception:
+            _session_path = None
+    print("[trace] 所有候选目录都不可写,本次会话无追踪日志")
+    return None
 
 
 def log(record: dict) -> None:
@@ -44,8 +55,10 @@ def log(record: dict) -> None:
         return
     record.setdefault("ts", datetime.now().isoformat(timespec="seconds"))
     try:
-        with open(_session_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        line = json.dumps(record, ensure_ascii=False, default=str)
+        with _write_lock:
+            with open(_session_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
     except Exception:
         pass
 
