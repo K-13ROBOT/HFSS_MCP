@@ -115,7 +115,7 @@ claude mcp add hfss-agent-native --scope user -e HFSS_VERSION="2025.2" -- "C:\..
 
 **license**:`install.py` 会把本机的 `ANSYSLMD_LICENSE_FILE` / `ANSYSLIC_DIR`(若有)带进 server env;缺了就按你平时启动 HFSS 的方式补进 env 块。
 
-**工程文件**:默认存到 server 运行目录(cwd)下的 `projects/`,可用环境变量 `HFSS_PROJECTS_DIR` 覆盖。
+**工程文件 / 导出**:`.aedt` 默认存到 server 运行目录(cwd)下的 `projects/`,导出的 CSV/报表存 `exports/`(分别可用 `HFSS_PROJECTS_DIR` / `HFSS_EXPORTS_DIR` 覆盖)。**cwd 由 MCP 客户端决定**——落在不可写目录时自动退到 `~/.hfss-agent/`,再不行退临时目录,不会启动失败。
 
 **阻塞操作的确认**:`analyze` / 参扫 / 优化耗时且阻塞。stdio 下进程内的 `[y/N]` 已关(stdin 被协议占用),改由**客户端权限系统**拦——Claude Code 靠 `settings.json` 里的 `ask` 规则(`install.py --project` 已写好 `mcp__hfss-agent-native__analyze`)。别的客户端要靠它自己的工具授权。
 
@@ -194,7 +194,7 @@ skill/hfss-antenna-modeling/
 ## 其它已知点
 
 - server 名 **`hfss-agent-native`** 写死(settings 的 `mcp__hfss-agent-native__analyze` 确认规则 key 在它上)。
-- 工程存到运行目录 cwd 下 `projects/`(可 `HFSS_PROJECTS_DIR` 覆盖)。
+- 工程存 cwd 下 `projects/`、导出存 `exports/`(可用 `HFSS_PROJECTS_DIR` / `HFSS_EXPORTS_DIR` 覆盖);cwd 不可写时自动退到 `~/.hfss-agent/`。
 
 ## License
 
