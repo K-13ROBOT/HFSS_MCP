@@ -1,5 +1,6 @@
 # HFSS 工程产出
 projects/
+exports/
 *.aedt
 *.aedt.lock
 *.aedt.auto

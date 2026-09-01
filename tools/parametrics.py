@@ -133,8 +133,8 @@ def run_parametric_sweep(ctx, name):
 # ────────────────────────── 结果提取 ──────────────────────────
 
 def _csv_dir():
-    from .session import PROJECTS_DIR
-    return PROJECTS_DIR
+    from .session import EXPORTS_DIR
+    return EXPORTS_DIR
 
 
 def _num(x):

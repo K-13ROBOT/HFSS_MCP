@@ -7,6 +7,7 @@
 """
 
 import os
+import tempfile
 
 import win32com.client as _wc
 
@@ -15,10 +16,34 @@ from . import tool
 # 版本:优先 HFSS_VERSION 环境变量(install 注入),否则 2025.2。ProgID 用 version[:6]。
 _DEFAULT_VERSION = os.environ.get("HFSS_VERSION") or "2025.2"
 
-# .aedt 存到运行目录(cwd)下的 projects/,可用 HFSS_PROJECTS_DIR 覆盖
-_env_projects = os.environ.get("HFSS_PROJECTS_DIR")
-PROJECTS_DIR = os.path.abspath(_env_projects) if _env_projects else os.path.abspath(os.path.join(os.getcwd(), "projects"))
-os.makedirs(PROJECTS_DIR, exist_ok=True)
+# 工作目录:.aedt 放 projects/,导出的 CSV/报表放 exports/(不和工程混)。
+# **绝不能在 import 期抛**:MCP 客户端各自决定 server 的 cwd —— Claude Code 给项目目录(可写),
+# 别的客户端可能给系统目录(如 C:\Windows\System32),那里 makedirs 会 PermissionError,
+# 整个 server 在 initialize 之前就死了。逐个候选试,全失败也只记下来、不抛。
+def _pick_writable_dir(env_var, name):
+    cands = []
+    env = os.environ.get(env_var)
+    if env:
+        cands.append(os.path.abspath(env))
+    cands.append(os.path.abspath(os.path.join(os.getcwd(), name)))
+    cands.append(os.path.join(os.path.expanduser("~"), ".hfss-agent", name))
+    cands.append(os.path.join(tempfile.gettempdir(), "hfss-agent", name))
+    last = None
+    for d in cands:
+        try:
+            os.makedirs(d, exist_ok=True)
+            probe = os.path.join(d, ".write_probe")   # makedirs 成功 ≠ 能写,真写一下
+            with open(probe, "w"):
+                pass
+            os.remove(probe)
+            return d, None
+        except Exception as e:
+            last = f"{d}: {type(e).__name__}"
+    return cands[-1], last   # 全不可写:先让 server 起来,用到时再如实报错
+
+
+PROJECTS_DIR, PROJECTS_DIR_ERROR = _pick_writable_dir("HFSS_PROJECTS_DIR", "projects")
+EXPORTS_DIR, EXPORTS_DIR_ERROR = _pick_writable_dir("HFSS_EXPORTS_DIR", "exports")
 
 # Modal/Terminal... → AEDT 原生 InsertDesign 的求解类型字符串
 _SOLUTION_MAP = {

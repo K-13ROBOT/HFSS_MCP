@@ -199,8 +199,8 @@ def get_s_parameters(ctx, setup=None, sweep=None, port=None, summary_only=True):
     soln = f"{setup} : {sweep}"
     expr = f"dB(S({port},{port}))"
     report_name = "S_export_tmp"
-    from .session import PROJECTS_DIR
-    csv_path = os.path.join(PROJECTS_DIR, f"_{setup}_{sweep}_S.csv")
+    from .session import EXPORTS_DIR
+    csv_path = os.path.join(EXPORTS_DIR, f"_{setup}_{sweep}_S.csv")
 
     # HFSS Modal:context 为空 [](对照 pyaedt standard report);families = ["Freq:=",["All"]];
     # CreateReport 参数个数跨版本有差异,7 参(新)/6 参(老)都试,谁不抛就用谁。
@@ -373,8 +373,8 @@ def get_input_metrics(ctx, setup=None, sweep=None, port=None, z0=50, vswr_max=2.
         port = ports[0]
 
     soln = f"{setup} : {sweep}"
-    from .session import PROJECTS_DIR
-    csv_path = os.path.join(PROJECTS_DIR, f"_{setup}_{sweep}_Zin.csv")
+    from .session import EXPORTS_DIR
+    csv_path = os.path.join(EXPORTS_DIR, f"_{setup}_{sweep}_Zin.csv")
     ok, err = _report_to_csv(oDesign, soln, [f"re(S({port},{port}))", f"im(S({port},{port}))"], csv_path)
     if not ok:
         return {"ok": False, "error": f"导出 re/im(S) 报告失败: {err}"}
@@ -467,12 +467,12 @@ def get_radiation_pattern(ctx, setup=None, sweep="LastAdaptive", sphere="Sphere1
     expr = f"dB({'Realized' if gain_type == 'realized' else ''}Gain{suffix})"
     soln = f"{setup} : {sweep}"
     oModule = oDesign.GetModule("ReportSetup")
-    from .session import PROJECTS_DIR
+    from .session import EXPORTS_DIR
 
     cuts = []
     for phi in phi_cuts:
         rname = "ff_tmp"
-        csv_path = os.path.join(PROJECTS_DIR, f"_ff_{phi}.csv")
+        csv_path = os.path.join(EXPORTS_DIR, f"_ff_{phi}.csv")
         fam = ["Theta:=", ["All"], "Phi:=", [str(phi)], "Freq:=", ["All"]]
         trace = ["X Component:=", "Theta", "Y Component:=", [expr]]
         forms = [

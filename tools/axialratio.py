@@ -89,10 +89,10 @@ def get_axial_ratio(ctx, setup=None, sweep="Sweep1", sphere="Sphere1", theta="0d
     expr = "dB(AxialRatioValue)"
     soln = "%s : %s" % (setup, sweep)
     oModule = oDesign.GetModule("ReportSetup")
-    from .session import PROJECTS_DIR
+    from .session import EXPORTS_DIR
 
     rname = "ar_tmp"
-    csv_path = os.path.join(PROJECTS_DIR, "_ar.csv")
+    csv_path = os.path.join(EXPORTS_DIR, "_ar.csv")
     fam = ["Theta:=", [str(theta)], "Phi:=", [str(phi)], "Freq:=", ["All"]]
     tr = ["X Component:=", "Freq", "Y Component:=", [expr]]
     forms = [
