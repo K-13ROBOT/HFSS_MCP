@@ -18,9 +18,11 @@ def _design_dir():
     env = os.environ.get("HFSS_DESIGN_DIR")
     if env:
         cands.append(os.path.abspath(env))
+    cands.append(os.path.expanduser("~/.claude/skills/hfss-design/design"))
+    # 旧名兜底:skill 曾叫 hfss-antenna-modeling,改名前装的副本(以及用户攒的卡片)还在那个目录下
     cands.append(os.path.expanduser("~/.claude/skills/hfss-antenna-modeling/design"))
     here = os.path.dirname(os.path.abspath(__file__))
-    cands.append(os.path.join(os.path.dirname(here), "skill", "hfss-antenna-modeling", "design"))
+    cands.append(os.path.join(os.path.dirname(here), "skill", "hfss-design", "design"))
     for d in cands:
         if d and os.path.isdir(d):
             return d, cands

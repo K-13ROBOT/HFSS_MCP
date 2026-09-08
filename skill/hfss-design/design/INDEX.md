@@ -11,7 +11,7 @@
 - 两者互补:**设计时读 `design/<type>.md` 起手,建模/调试时配合读 `knowledge/<type>.md`。**
 
 新建卡:复制 [`_TEMPLATE.md`](_TEMPLATE.md) 成 `<type>.md`,在下面加一行指针。
-**先沉淀自己验证过的设计,再逐步收录文献。**
+**先沉淀自己验证过的设计,再逐步收录文献。** 库里没有匹配拓扑时,走 `hfss-search` skill 检索文献提炼起手尺寸——但**必须建模仿真达标后才录卡**,且录的是公式/归一化常数,不是论文那一款的绝对尺寸。
 
 ## 卡片
 - [microstrip-patch.md](microstrip-patch.md) — 矩形微带贴片(闭式 W/L + inset 调匹配,任意 f₀/εr)
