@@ -1,3 +1,7 @@
+# 参考文献原文(版权,不入库;papers/_HOWTO.md 是通用读法,要入库)
+skill/*/papers/*.pdf
+skill/*/papers/INDEX.md
+
 # HFSS 工程产出
 projects/
 exports/

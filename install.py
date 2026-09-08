@@ -8,7 +8,7 @@ ProgID 由注册表解析,不需要 ANSYSEM_ROOT 路径。
 用法:
   python install.py                  # 只打印 .mcp.json 块 + claude mcp add 命令,不动文件
   python install.py --project DIR     # 把 .mcp.json / skill / settings 写进项目目录 DIR
-  python install.py --skill-user      # 把 skill 复制到 ~/.claude/skills/(全局)
+  python install.py --skill-user      # 把全部 skill 复制到 ~/.claude/skills/(全局)
 
 绝不改全局 ~/.claude.json;用户级 MCP 注册用打印出来的 `claude mcp add` 命令。
 """
@@ -22,7 +22,7 @@ from pathlib import Path
 
 BUNDLE = Path(__file__).resolve().parent
 SERVER = BUNDLE / "hfss_mcp_server.py"
-SKILL_SRC = BUNDLE / "skill" / "hfss-antenna-modeling"
+SKILLS_SRC = BUNDLE / "skill"      # 下面每个含 SKILL.md 的子目录 = 一个 skill,全部安装
 SETTINGS_SNIPPET = BUNDLE / "settings.snippet.json"
 
 SERVER_NAME = "hfss-agent-native"   # 固定:settings 的 ask 规则 key 在它上(mcp__hfss-agent-native__analyze)
@@ -98,6 +98,9 @@ def _skill_ignore(dirpath, names):
     用户安装副本里已攒的。只带通用框架:SKILL.md、`_*.md`(_general/_optimization/_TEMPLATE)、INDEX.md。
     例外 = _SKILL_STARTERS 里的种子卡(教科书参考,作为 starter 发)。"""
     base = os.path.basename(dirpath).lower()
+    if base == "papers":
+        # papers/ 只发通用读法 _HOWTO.md;INDEX.md 是个人的原文索引、PDF 有版权,都不随分发走
+        return [n for n in names if n != "_HOWTO.md"]
     if base not in ("knowledge", "design"):
         return []
     keep = _SKILL_STARTERS.get(base, set())
@@ -106,10 +109,42 @@ def _skill_ignore(dirpath, names):
             and n.lower() != "index.md" and n.lower() not in keep]
 
 
+def _copy_skill(src: Path, dest: Path):
+    """复制一个 skill,遵守 _skill_ignore。**已存在的 INDEX.md 一律不覆盖**——
+    它是用户随使用追加条目的活文档(卡片指针都在里面),覆盖会把攒的条目抹掉。
+    返回因此被跳过、且内容与 bundle 不同的文件列表,供调用方提示用户手工合并。"""
+    kept = []
+    for root, dirs, files in os.walk(src):
+        rel = Path(root).relative_to(src)
+        ignored = set(_skill_ignore(root, files + dirs))
+        dirs[:] = [d for d in dirs if d not in ignored]
+        (dest / rel).mkdir(parents=True, exist_ok=True)
+        for fn in files:
+            if fn in ignored:
+                continue
+            s_path, d_path = Path(root) / fn, dest / rel / fn
+            if fn.lower() == "index.md" and d_path.exists():
+                if d_path.read_bytes() != s_path.read_bytes():
+                    kept.append(d_path)
+                continue
+            shutil.copy2(s_path, d_path)
+    return kept
+
+
 def install_skill(dest_skills_dir: Path):
-    dest = dest_skills_dir / SKILL_SRC.name
-    shutil.copytree(SKILL_SRC, dest, dirs_exist_ok=True, ignore=_skill_ignore)
-    print(f"  [写] {dest}(仅通用框架;按天线类型的 knowledge/design 卡片不复制,保留安装副本已有的)")
+    """安装 skill/ 下的**每一个** skill(判据:目录里有 SKILL.md)。"""
+    srcs = sorted(d for d in SKILLS_SRC.iterdir() if d.is_dir() and (d / "SKILL.md").is_file())
+    if not srcs:
+        print(f"  [警告] {SKILLS_SRC} 下没找到 skill(子目录需含 SKILL.md),跳过")
+        return
+    kept = []
+    for src in srcs:
+        dest = dest_skills_dir / src.name
+        kept += _copy_skill(src, dest)
+        print(f"  [写] {dest}")
+    print("        (仅通用框架;knowledge/design 里按天线类型的卡片不复制,保留安装副本已有的)")
+    for k in kept:
+        print(f"  [跳过] {k} 已存在且与 bundle 不同——保留你的版本,如需 bundle 的改动请手工合并")
 
 
 def install_project(project_dir: str):
@@ -136,7 +171,7 @@ def main():
     ap = argparse.ArgumentParser(description="注册 HFSS native MCP bundle 给 Claude Code")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--project", metavar="DIR", help="把 .mcp.json/skill/settings 写进项目目录")
-    g.add_argument("--skill-user", action="store_true", help="把 skill 复制到 ~/.claude/skills/")
+    g.add_argument("--skill-user", action="store_true", help="把全部 skill 复制到 ~/.claude/skills/")
     args = ap.parse_args()
     if not SERVER.exists():
         sys.exit(f"找不到 {SERVER} —— install.py 必须和 hfss_mcp_server.py 同目录")
