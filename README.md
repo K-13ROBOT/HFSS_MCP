@@ -1,6 +1,6 @@
 # HFSS MCP Server (native / 跨版本版)
 
-放进 Claude Code(或任何 MCP 客户端)后,你用**自然语言**描述天线,模型照 `hfss-antenna-modeling` skill 的纪律调本 server 的工具,在 HFSS 里**真的建模、求解、出结果**。
+放进 Claude Code(或任何 MCP 客户端)后,你用**自然语言**描述天线,模型照 `hfss-design` skill 的纪律调本 server 的工具,在 HFSS 里**真的建模、求解、出结果**。
 
 > 本 server 是标准 **MCP stdio server**(官方 `mcp` SDK),协议层不绑任何客户端。下文以 Claude Code 为例;换别的 MCP 客户端见 [用别的 MCP 客户端](#用别的-mcp-客户端)。
 
@@ -30,7 +30,9 @@
 
 **可用性**:求解前 bbox 自检挡建歪、自动配色(导体金/铜、介质半透明、空气近透明)、阻塞操作弹确认框。
 
-**skill 层(让"从论文复现"成为可能的纪律)**:读图解析(数字从参数表抽、图只判拓扑、歧义先确认)→ 经验库(`skill/.../knowledge/`,排错机理)+ 设计卡片库(`skill/.../design/`,正向设计起手)→ 显式规划 → 坐标/层叠约定 → 求解前自检 → 馈电/扫参/优化套路 → **指标驱动设计闭环**(检索卡片→缩放→建模→`check_design_targets` 对标→定向调,§10)。
+**skill 层(三个,让"从论文复现"成为可能的纪律)**:`hfss-design` = 读图解析(数字从参数表抽、图只判拓扑、歧义先确认)→ 经验库(`skill/.../knowledge/`,排错机理)+ 设计卡片库(`skill/.../design/`,正向设计起手)→ 显式规划 → 坐标/层叠约定 → 求解前自检 → 馈电/扫参/优化套路 → **指标驱动设计闭环**(检索卡片→缩放→建模→`check_design_targets` 对标→定向调,§10)。
+`hfss-search` = 补上闭环里"卡片库没有匹配拓扑"那个分支:指标→英文检索式→候选筛选(含**可缩放性**判据和"这结构我们建不建得出来"一道门)→精读 PDF 抽参数表→产出结构理解表交用户确认→回建模闭环;**达标后才准录卡,且录公式不录绝对尺寸**。付费文献的 PDF 由用户下载(抓取不带机构 IP/登录态)。
+`hfss-stackup` = 板厂叠层表(StackUp Report)还原成多层板:难点不在 HFSS 操作,在读懂表里几条不成文的行业约定(D 层占号不占铜、连续同名 PP 是**组**总厚、oz→mm 与电镀增量)——读错一条整板厚度就错且错得隐蔽,所以流程强制**总厚自校验 + 出层表让用户确认**才动手建模。
 
 ## 已验证
 
@@ -88,7 +90,7 @@ python install.py --project D:\path\to\your\project
 
 一条命令写好三样(已存在则合并,不覆盖):
 - `<项目>\.mcp.json` ← MCP server 注册(项目级)
-- `<项目>\.claude\skills\hfss-antenna-modeling\` ← skill(含 knowledge/ 经验库 + design/ 设计卡片库)
+- `<项目>\.claude\skills\hfss-design\` ← skill(含 knowledge/ 经验库 + design/ 设计卡片库)
 - `<项目>\.claude\settings.json` ← 给 `analyze` 加"执行前确认"(防误触阻塞操作)
 
 **方式 B — 全局(所有项目可用)**
@@ -107,7 +109,7 @@ claude mcp add hfss-agent-native --scope user -e HFSS_VERSION="2025.2" -- "C:\..
 
 1. **重启 Claude Code**(改了 MCP 配置必须重启才加载)。
 2. `/mcp` 应看到 **`hfss-agent-native`**。
-3. 直接说一句"用 HFSS 建一个 2.45GHz 微带贴片并跑 S11",Claude 会自动走 `hfss-antenna-modeling` skill 调工具建模、求解、出结果。
+3. 直接说一句"用 HFSS 建一个 2.45GHz 微带贴片并跑 S11",Claude 会自动走 `hfss-design` skill 调工具建模、求解、出结果。
 
 ## 配置 & 用法
 
@@ -139,8 +141,8 @@ server 是标准 MCP stdio,**任何 MCP 客户端都能挂**(Claude Desktop、Cl
 
 换客户端会**丢两样 Claude Code 专属能力**,知道就行:
 
-1. **skill 不会自动加载**——`hfss-antenna-modeling` 是 Claude 的 skill 机制,别的客户端不读。工具照样能调,但丢了"怎么正确用"的纪律(坐标/层叠约定、求解前自检、经验库、设计闭环)。
-   - 变通:把本仓库 `skill/hfss-antenna-modeling/SKILL.md`(及 `knowledge/`、`design/`)的内容放进那个 agent 的 system prompt / 上下文当指南。
+1. **skill 不会自动加载**——`hfss-design` 是 Claude 的 skill 机制,别的客户端不读。工具照样能调,但丢了"怎么正确用"的纪律(坐标/层叠约定、求解前自检、经验库、设计闭环)。
+   - 变通:把本仓库 `skill/hfss-design/SKILL.md`(及 `knowledge/`、`design/`)的内容放进那个 agent 的 system prompt / 上下文当指南。
 2. **确认门**——如上,stdio 下进程内确认已关。客户端若没有工具授权 UI,`analyze`/扫参/优化会**直接跑、不问你**。用支持 MCP 工具授权的客户端,或自己留意别误触。
 
 ## 代码结构
@@ -154,10 +156,16 @@ tools/*.py           按域分文件:session / geometry / booleans / transforms 
 model_state.py       Agent 侧的模型状态镜像(对象/变量/边界/激励/setup),供 design_summary 等用
 install.py           打印/写入 MCP 配置 + 安装 skill(不改全局 ~/.claude.json)
 smoke_mcp.py         不启 HFSS 的 stdio 冒烟:工具能否注册、协议往返是否干净
-skill/hfss-antenna-modeling/
-    SKILL.md         建模纪律(坐标/层叠约定、求解前自检、馈电/扫参/优化套路、设计闭环)
+skill/hfss-design/      建模纪律 skill
+    SKILL.md         坐标/层叠约定、求解前自检、馈电/扫参/优化套路、指标驱动设计闭环
     knowledge/       排错经验库(按天线类型,随用变厚)
     design/          设计卡片库(λ 归一化尺寸/闭式公式,供 search_designs 检索)
+    papers/          原文库:_HOWTO.md(通用读法,随分发)+ INDEX.md/PDF(个人资料,不分发)
+skill/hfss-search/                文献检索 skill
+    SKILL.md         指标→检索式→候选筛选→交回原文库精读→出确认表→回建模闭环
+skill/hfss-stackup/               PCB 叠层还原 skill
+    SKILL.md         dump 表格→解析行业约定→总厚自校验→出层表确认→参数化建模
+                     (install.py 遍历 skill/ 下每个含 SKILL.md 的目录,三个一起装)
 ```
 
 ## 当前短板
