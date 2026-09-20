@@ -127,6 +127,158 @@ def create_sweep(ctx, setup, name, start_frequency, stop_frequency, num_points=4
             "save_fields": bool(save_fields)}
 
 
+def _setups_of(oDesign):
+    """当前 design 的 setup 名列表。取不到返回 None。"""
+    try:
+        r = oDesign.GetModule("AnalysisSetup").GetSetups()
+        return [str(s) for s in (r or [])]
+    except Exception:
+        return None
+
+
+def _sweeps_of(oDesign, setup):
+    """某 setup 下现有的扫频名列表。取不到返回 None(区别于"存在但没有扫频"的空列表)。"""
+    try:
+        r = oDesign.GetModule("AnalysisSetup").GetSweeps(setup)
+        return [str(s) for s in (r or [])]
+    except Exception:
+        return None
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "delete_sweep",
+        "description": ("删除 setup 上的扫频。**`create_sweep` 不能同名覆盖**(会报 com_error),扫频参数建错了"
+                        "只能先用本工具删掉再重建。另一个重要用途:**调参阶段清掉存场扫频**——"
+                        "每条扫频都会在之后每次 analyze 里重算,存场频点每个要写完整三维场(实测约 90-100 秒/点、"
+                        "几百 MB/点),堆几条下来单轮求解能从十几分钟涨到一两个小时。"
+                        "**必须显式 confirm=true 才真删**(不带只回显该 setup 现有扫频清单,不动任何东西)。"
+                        "名字写错则整批不动。注意:删扫频会同时丢掉它已求解的结果数据。"),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "setup": {"type": "string", "description": "扫频所属的 setup 名"},
+                "names": {"type": "array", "items": {"type": "string"},
+                          "description": "要删的扫频名列表;省略则只回显清单"},
+                "confirm": {"type": "boolean", "default": False,
+                            "description": "必须显式传 true 才真正删除"},
+            },
+            "required": ["setup"],
+        },
+    },
+})
+def delete_sweep(ctx, setup, names=None, confirm=False):
+    oDesign = ctx["oDesign"]
+    existing = _sweeps_of(oDesign, setup)
+    if existing is None:
+        return {"ok": False, "error": f"取不到 setup '{setup}' 的扫频清单(setup 名是否写错?)"}
+
+    if not names:
+        return {"ok": True, "setup": setup, "sweeps": existing,
+                "deleted": [], "hint": "传 names + confirm=true 才会删除"}
+
+    names = [str(n) for n in names]
+    missing = [n for n in names if n not in existing]
+    if missing:
+        return {"ok": False, "error": f"这些扫频在 setup '{setup}' 下不存在: {missing}",
+                "sweeps": existing, "hint": "名字写错则整批不动,核对后重试"}
+
+    if not confirm:
+        return {"ok": True, "setup": setup, "sweeps": existing, "would_delete": names,
+                "deleted": [], "hint": "确认无误后带 confirm=true 再调一次才会真删"}
+
+    oModule = oDesign.GetModule("AnalysisSetup")
+    deleted, failed = [], {}
+    for n in names:
+        try:
+            oModule.DeleteSweep(setup, n)
+            deleted.append(n)
+        except Exception as e:
+            failed[n] = f"{type(e).__name__}: {e}"
+
+    if "state" in ctx:
+        st = ctx["state"].setups.get(setup)
+        if isinstance(st, dict) and isinstance(st.get("sweeps"), list):
+            st["sweeps"] = [s for s in st["sweeps"]
+                            if not (isinstance(s, dict) and s.get("name") in deleted)]
+
+    out = {"ok": not failed, "setup": setup, "deleted": deleted,
+           "remaining": _sweeps_of(oDesign, setup) or []}
+    if failed:
+        out["failed"] = failed
+        out["error"] = f"部分扫频删除失败: {list(failed)}"
+    else:
+        out["hint"] = "删完记得 save_project 才写进 .aedt"
+    return out
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "delete_setup",
+        "description": ("删除求解 setup。探索阶段容易堆一堆试出来的 setup(轻量调参的、单频取场的、不同自适应频点的),"
+                        "留着会拖慢工程加载与存盘、也容易误取到旧结果。"
+                        "**必须显式 confirm=true 才真删**(不带只回显现有 setup 清单及各自的扫频,不动任何东西)。"
+                        "名字写错则整批不动。"
+                        "**注意:删 setup 会连带删掉它下面的所有扫频和已求解的结果数据,不可撤销**——"
+                        "删之前先确认要保留的曲线已经取过数/导出过。"),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "names": {"type": "array", "items": {"type": "string"},
+                          "description": "要删的 setup 名列表;省略则只回显清单"},
+                "confirm": {"type": "boolean", "default": False,
+                            "description": "必须显式传 true 才真正删除"},
+            },
+        },
+    },
+})
+def delete_setup(ctx, names=None, confirm=False):
+    oDesign = ctx["oDesign"]
+    existing = _setups_of(oDesign)
+    if existing is None:
+        return {"ok": False, "error": "取不到 setup 清单(是否没有 active design?)"}
+
+    def _listing():
+        return {s: (_sweeps_of(oDesign, s) or []) for s in existing}
+
+    if not names:
+        return {"ok": True, "setups": _listing(), "deleted": [],
+                "hint": "传 names + confirm=true 才会删除;删 setup 会连带删掉其下扫频与结果"}
+
+    names = [str(n) for n in names]
+    missing = [n for n in names if n not in existing]
+    if missing:
+        return {"ok": False, "error": f"这些 setup 不存在: {missing}",
+                "setups": existing, "hint": "名字写错则整批不动,核对后重试"}
+
+    if not confirm:
+        return {"ok": True, "setups": _listing(), "would_delete": names, "deleted": [],
+                "hint": "确认无误后带 confirm=true 再调一次才会真删(连带删掉其下扫频与已求解结果)"}
+
+    oModule = oDesign.GetModule("AnalysisSetup")
+    deleted, failed = [], {}
+    for n in names:
+        try:
+            oModule.DeleteSetups([n])
+            deleted.append(n)
+        except Exception as e:
+            failed[n] = f"{type(e).__name__}: {e}"
+
+    if "state" in ctx:
+        for n in deleted:
+            ctx["state"].setups.pop(n, None)
+
+    out = {"ok": not failed, "deleted": deleted, "remaining": _setups_of(oDesign) or []}
+    if failed:
+        out["failed"] = failed
+        out["error"] = f"部分 setup 删除失败: {list(failed)}"
+    else:
+        out["hint"] = "删完记得 save_project 才写进 .aedt"
+    return out
+
+
 @tool({
     "type": "function",
     "function": {

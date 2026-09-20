@@ -121,6 +121,7 @@ description: >-
 - **新任务先 `design_summary` 看全景**——用户说"仿真/扫参/取数据"时尤其要查,确认 setup/port/boundary 是否已存在,**不要重复创建**
 - 复杂结构先 `set_variable` 再用变量名建几何
 - 建错用 `delete_object` 删掉重建,不要堆叠;不确定就 `list_objects` / `list_variables`
+- **setup / 扫频建错同样不能同名覆盖**(`create_sweep` 重名直接 com_error)——用 `delete_sweep` / `delete_setup` 删掉再重建。两者都要**显式 `confirm=true` 才真删**,不带 confirm 只回显清单,可以先拿它当"列出现有 setup 及其扫频"用
 
 ## 5. 2D sheet → 导体规则
 - `create_rectangle` / `create_polyline` 是 2D sheet,本身不是导体
@@ -174,7 +175,8 @@ description: >-
    - 地板/基板 xy 范围 **盖住**辐射体(gnd 的 xmin/xmax/ymin/ymax ⊇ patch 的)
    - 没有该分离的对象 z 范围重叠(穿模)
    - 发现不对 → `delete_object` 改正后重建,**绝不带着错几何 analyze**(那是又错又慢的根源)
-7. `create_setup`(频率取工作频率)→ `create_sweep`(覆盖工作频率)
+7. `create_setup`(频率取工作频率)→ `create_sweep`(覆盖工作频率)。
+   **存场扫频(`save_fields=True`)要当耗材管**:每条扫频在之后**每次** analyze 里都会重算,存场频点每个要写完整三维场(实测 ~90-100 秒/点、几百 MB/点),堆几条下来单轮求解能从十几分钟涨到一两个小时。取场/取远场用完就 `delete_sweep(setup, names, confirm=True)` 清掉,只留调参真正要看的那条
 8. **【HFSS 自检 —— analyze 前必做,治"配置漏"】** 调 `validate_design` 跑 HFSS 自带的 Validation Check:端口缺积分线、setup 没绑激励、边界重叠、材料缺失——30 秒查出来,省得求解 10 分钟后才发现白跑。`passed=false` 先修完再往下。**与第 6 步分工**:bbox 查**几何**建歪没(我们自己的自检),这步查 **HFSS 认不认**这个 design。
    - 判定以 HFSS 返回码为准。**老版本(2019.2 实测)消息窗口写入滞后可达几十秒**,所以 `passed=false` 但 `errors` 为空是正常的——过一会儿调 `get_messages` 才看得到"错在哪"(2025.2 是即时的)。
 9. `analyze` 跑求解(阻塞)
