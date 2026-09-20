@@ -411,6 +411,66 @@ def list_designs(ctx):
 @tool({
     "type": "function",
     "function": {
+        "name": "delete_design",
+        "description": (
+            "从 active project 删除 design(**不可逆**)。names 传名字列表;**必须显式 confirm=true 才真删**,"
+            "不带 confirm 只回显将要删除的清单。删掉 active design 后会清空 ctx 里的 design/editor 句柄,"
+            "后续建模前要先 activate_design。**删完要 save_project 才落盘**。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "names": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+                          "description": "要删除的 design 名列表"},
+                "confirm": {"type": "boolean", "default": False,
+                            "description": "必须显式传 true;否则只返回清单不动手"},
+            },
+            "required": ["names"],
+        },
+    },
+})
+def delete_design(ctx, names, confirm=False):
+    oProject = ctx.get("oProject")
+    if oProject is None:
+        return {"ok": False, "error": "无 active project"}
+    names = [names] if isinstance(names, str) else list(names)
+    try:
+        existing = list(oProject.GetTopDesignList() or [])
+    except Exception as e:
+        return {"ok": False, "error": f"取 design 列表失败: {e}"}
+    missing = [n for n in names if n not in existing]
+    if missing:   # 名字写错就整批不动,避免误删同名前缀的其它 design
+        return {"ok": False, "error": f"这些 design 不存在: {missing}", "designs": existing}
+    if not confirm:
+        return {"ok": False, "error": "未确认,没有删除任何东西",
+                "would_delete": names, "hint": "核对无误后带 confirm=true 再调一次"}
+    deleted, failed = [], {}
+    for n in names:
+        try:
+            oProject.DeleteDesign(n)
+            deleted.append(n)
+        except Exception as e:
+            failed[n] = f"{type(e).__name__}: {e}"
+    if ctx.get("design_name") in deleted:   # 删掉的正是当前 design,句柄已失效
+        ctx["oDesign"] = None
+        ctx["oEditor"] = None
+        ctx["design_name"] = None
+        if "state" in ctx:
+            ctx["state"].design = None
+    try:
+        remaining = list(oProject.GetTopDesignList() or [])
+    except Exception:
+        remaining = None
+    result = {"ok": not failed, "deleted": deleted, "remaining": remaining,
+              "hint": "改动还在内存里,调 save_project 才写进 .aedt"}
+    if failed:
+        result["failed"] = failed
+    return result
+
+
+@tool({
+    "type": "function",
+    "function": {
         "name": "reset_session",
         "description": "强制清空 Agent 内部会话状态(desktop/project/design 全置空)。COM 句柄失效时调用。",
         "parameters": {"type": "object", "properties": {}},

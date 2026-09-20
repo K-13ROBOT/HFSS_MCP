@@ -172,19 +172,24 @@ def analyze(ctx, setup=None):
                 "sweep": {"type": "string", "description": "sweep 名,不传用该 setup 第一个"},
                 "port": {"type": "string", "description": "端口名(如 'P1'),不传用第一个"},
                 "summary_only": {"type": "boolean", "default": True, "description": "false 附完整频率/S 数组"},
+                "expression": {"type": "string",
+                               "description": ("可选:自定义 dB 量表达式,替代默认 dB(S(port,port))。"
+                                               "多口同时馈电(如四臂螺旋 0/90/180/270°)要看实际匹配,先 set_port_excitation "
+                                               "设好幅相,再传 'dB(ActiveS(P1:1))' 取有源反射系数。须是 dB 量(带宽按 -10dB 分段)。")},
             },
         },
     },
 })
-def get_s_parameters(ctx, setup=None, sweep=None, port=None, summary_only=True):
+def get_s_parameters(ctx, setup=None, sweep=None, port=None, summary_only=True, expression=None):
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
 
     # 解析 setup / sweep / port(从 state)
     setups = list(state.setups.keys()) if state else []
-    if not setups:
-        return {"ok": False, "error": "无 setup"}
-    setup = setup or setups[0]
+    if setup is None:   # 只有没显式给 setup 才需要 state;重开工程后 state.setups 为空,显式给的不该被挡
+        if not setups:
+            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup/sweep/port)"}
+        setup = setups[0]
     sw_list = state.setups.get(setup, {}).get("sweeps", []) if state else []
     if sweep is None:
         if not sw_list:
@@ -197,7 +202,7 @@ def get_s_parameters(ctx, setup=None, sweep=None, port=None, summary_only=True):
         port = ports[0]
 
     soln = f"{setup} : {sweep}"
-    expr = f"dB(S({port},{port}))"
+    expr = expression or f"dB(S({port},{port}))"
     report_name = "S_export_tmp"
     from .session import EXPORTS_DIR
     csv_path = os.path.join(EXPORTS_DIR, f"_{setup}_{sweep}_S.csv")
@@ -358,9 +363,10 @@ def get_input_metrics(ctx, setup=None, sweep=None, port=None, z0=50, vswr_max=2.
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
     setups = list(state.setups.keys()) if state else []
-    if not setups:
-        return {"ok": False, "error": "无 setup"}
-    setup = setup or setups[0]
+    if setup is None:   # 只有没显式给 setup 才需要 state;重开工程后 state.setups 为空,显式给的不该被挡
+        if not setups:
+            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup/sweep/port)"}
+        setup = setups[0]
     sws = state.setups.get(setup, {}).get("sweeps", []) if state else []
     if sweep is None:
         if not sws:
@@ -458,9 +464,10 @@ def get_radiation_pattern(ctx, setup=None, sweep="LastAdaptive", sphere="Sphere1
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
     setups = list(state.setups.keys()) if state else []
-    if not setups:
-        return {"ok": False, "error": "无 setup"}
-    setup = setup or setups[0]
+    if setup is None:   # 只有没显式给 setup 才需要 state;重开工程后 state.setups 为空,显式给的不该被挡
+        if not setups:
+            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup/sweep/port)"}
+        setup = setups[0]
     if not phi_cuts:
         phi_cuts = ["0deg", "90deg"]
     suffix = _POL.get(polarization, "Total")

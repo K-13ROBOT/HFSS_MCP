@@ -10,6 +10,10 @@
 
 ## 按天线类型
 - [microstrip-patch.md](microstrip-patch.md) — 矩形微带贴片(边馈/inset/探针/CP 切角)
-- [magneto-electric-dipole.md](magneto-electric-dipole.md) — 磁电偶极子(平面振子 + 折叠短路贴片 + 腔体反射板)
+- [magneto-electric-dipole.md](magneto-electric-dipole.md) — 磁电偶极子/互补天线(电偶极+短路 λ/4 贴片:双谐振分工、Γ 探针匹配、降高度代价、双极化机理)
+
+- [vivaldi-tapered-slot.md](vivaldi-tapered-slot.md) - 渐变槽天线 Vivaldi/AVA/BAVA(行波"辐射完"判据、超宽带分带建模、t_eff 判据用法转变、渐变段长度由最低频定、AVA vs BAVA 选型)
+
+- [quadrifilar-helix.md](quadrifilar-helix.md) — 四臂螺旋 QHA/PQHA(柱面螺旋带的共面梯形分段建法、匝数由三角关系反解、主臂+寄生臂双频自由度、四端口 90° 馈电与极化判定)
 
 <!-- 新天线类型:新建 <type>.md,在此加一行指针 -->

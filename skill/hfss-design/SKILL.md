@@ -96,7 +96,8 @@ description: >-
 ## 3. 通用约定
 - 坐标/尺寸是**字符串**,带单位(`'10mm'`)或变量表达式(`'L1+1mm'`),不要传裸数字
 - 对象名只用英文字母数字下划线;材料用 HFSS 内置库(`'copper'`/`'FR4_epoxy'`/`'Vacuum'`)
-- 颜色/透明度工具按材料和角色自动配(金属铜/金色、介质半透明绿、空气近透明、端口面灰),**不用手动设颜色**;赋 PE/有限电导率后导体面会自动变金/铜色
+- 颜色/透明度工具按材料和角色自动配(金属铜色、PE 导体金色、空气近透明、端口面灰),**一般不用手动设颜色**;赋 PE/有限电导率后导体面会自动变金/铜色d
+- **介质是逐材料换色的**(海绿/宝蓝/兰花紫/深青…按首次出现顺序取调色板,同一材料全程同色),所以多层板/多介质能一眼分开;要覆盖自动配色或临时高亮某个件,用 `set_object_color`(不传 names 则只回查"材料→颜色"分配表)
 - **论文基板 εr/tanδ 跟库里材料对不上(如库里 FR4_epoxy εr≈4.4 ≠ 论文 4.2)→ 用 `create_material` 按原值精确建**再引用,别将就库材料(会让谐振系统性偏);这是忠实复现的一部分
 
 ## 3.5 几何坐标 / 层叠约定(复现文献"建歪"的根因 —— 必守)
@@ -125,7 +126,7 @@ description: >-
 - `create_rectangle` / `create_polyline` 是 2D sheet,本身不是导体
 - 要当导体(贴片、地板)用,建完 sheet 后调 `assign_perfect_e`
 - **例外:端口 sheet 不要赋 PE**——会让 lumped_port 失效
-- 要把 sheet 变成 **3D 实体**(介质基板、金属块、墙体等)用 `thicken`(原地加厚成同名实体,可传 material)。
+- 要把 sheet 变成 **3D 实体**(介质基板、金属块、墙体等)用 `thicken(objects, thickness, material=...)`(沿法线原地加厚,结果保留原名;`both_sides=True` 则以 sheet 为中面双向加厚)。thickness 可用变量表达式。
   规则形状(长方体基板)直接 `create_box` 更省事;**不规则截面**(多边形基板、异形结构)才"画 sheet → thicken"。
 
 ## 5.5 几何变换 / 阵列
@@ -141,9 +142,21 @@ description: >-
 - "8 元圆阵":建第一个 + `duplicate_around_axis(axis='Z', angle='45deg', n_clones=8)`
 
 ## 5.6 进阶边界 / 材料 / 网格(按需,默认流程用不到)
-- **sheet 上的其它边界**:`assign_perfect_h`(磁壁 PMC)、`assign_finite_conductivity`(真实金属损耗,要算效率/Q 时替代 PE,传 material='copper')、`assign_impedance`(薄电阻片/吸波等效表面阻抗)、`assign_lumped_rlc`(集总 R/L/C 负载,要电流 direction)
+- **sheet 上的其它边界**:`assign_perfect_h`(磁壁 PMC)、`assign_finite_conductivity`(真实金属损耗,要算效率/Q 时替代 PE,传 material='copper')、`assign_impedance`(薄电阻片/吸波等效表面阻抗)、`assign_lumped_rlc`(集总 R/L/C 负载,要电流方向线 `current_start`→`current_end`)
 - **事后改/赋材料**:`assign_material`(给已建**实体**换材料;sheet 导体面用 assign_perfect_e)
 - **网格细化提精度**:`assign_mesh_length`(关键区域限最大边长)、`assign_mesh_surface`(圆柱/球等**曲面**结构的曲率细化 level 1-3)。默认自适应网格够用,**收敛慢/结果可疑时**才手动加
+
+## 5.7 螺旋结构(create_helix / split)
+四臂螺旋、单臂螺旋、螺旋带这类**沿圆柱面卷绕**的结构,一律用 `create_helix`,**不要用 polyline 平面片拼**
+(拼出来是圆柱的弦,相邻部件边对不上会悬空,且无法参数化——见 `knowledge/quadrifilar-helix.md`)。
+- 轮廓:在圆柱面上(如 x=r·cosφ₀, y=r·sinφ₀)画一条**竖直短线**(`create_polyline`,close/cover 都 False),
+  长度 = 带子沿 z 的宽度 = 垂直带宽 / 周向方向余弦。
+- `create_helix(profile, pitch, turns, right_hand)`:轴默认 +Z 过原点;pitch = 每圈轴向前进;轮廓原地变成螺旋面,名字不变。
+  **pitch/turns/轮廓坐标都能写成设计变量表达式** → 整体缩放系数 `k` 等可以直接参扫。
+- 同一螺旋上 z 偏移的多条带(主臂/缝/寄生臂)各扫一次:它们的边是**完全重合的螺旋线**,`unite` 成一张片即可,天然连通。
+- 端头要水平:`split(objects, plane='XY', offset=z, keep='positive'|'negative')`,offset 可用表达式。
+  sheet 不能被 solid `subtract`,切 sheet 只能用 `split`。
+- 旋向自检:扫完看 bbox 的 y 范围与预期(右旋时顶端落在 φ 增大方向)对比,不对就换 `right_hand`。
 
 ## 6. S 参数仿真完整流程(顺序敏感)
 1. `set_variable` 定义关键参数
@@ -153,7 +166,7 @@ description: >-
    - **边缘/微带馈电** → `create_edge_feed_port`(一步:自动建矩形 sheet + port)
    - **同轴探针馈电** → `create_coax_feed_port`(一步:自动钻孔 + 探针 + 环形片 + port)
    - **其它任意馈电**(缝隙耦合 / 近耦合 / CPW / 差分 / 多层混合 / 自定义形状…)→ 无专用工具,按 §6.5 通用法用图元手搭
-   - **波导口 / 需要模式分析** → `create_wave_port`(端口 sheet 必须贴模型边界,不是浮在内部)
+   - **波导口 / 需要模式分析**(矩形/圆波导、SIW、要看高次模或 de-embed)→ `create_wave_port(name, sheet)`:**端口 sheet 必须贴模型外边界**,浮在求解域内部的要改用 `create_lumped_port`;单模只看 S 参数可不给积分线,要定阻抗归一化方向才传 `int_start`/`int_end`;看高次模加 `num_modes`
 5. `create_open_region` 加辐射边界(频率取工作频率,不加就没辐射)
 6. **【几何自检 —— 求解前必做,治"建歪"】** 调 `get_object_bbox`(不传名=取全部)核对层叠/搭接,**确认无误再往下**:
    - 贴片底面 `zmin` == 基板顶面 `zmax`(== subH)→ 不悬空、不陷进基板
@@ -194,11 +207,13 @@ description: >-
 S 参数流程外加:
 - setup 之前调 `create_infinite_sphere`(默认 θ 0-180°/2°、φ 0-360°/5° 够用)
 - analyze 后取**标量指标**(参扫,多变量组合):`get_parametric_gain` / `get_parametric_axial_ratio`(CP 必看) / `get_parametric_front_to_back` / `get_parametric_hpbw` / `get_parametric_cross_pol_isolation`
-- 要**整条方向图曲线**(单个已求解设计,增益 vs 角度)→ `get_radiation_pattern`:默认导 E面(φ=0)/H面(φ=90)两刀,返回 theta/gain 数组 + 峰值,可传 `csv_path` 导成 CSV 画图;CP 天线传 `polarization='lhcp'/'rhcp'`
+- 单个已求解设计(非参扫)直接取 **轴比 vs 频率 + 3dB AR 带宽** → `get_axial_ratio`(默认 boresight θ=0/φ=0)。CP 天线 analyze 完先用它,不必为看一个 AR 去建参扫。
+  **前提**:扫频必须建成 `create_sweep(..., sweep_type='Discrete', save_fields=True)`——实测 2025.2 上只设 `save_rad_fields` 不生效(远场报告报 com_error)。要取 AR 就在建 sweep 时一并设好,别等 analyze 完再发现白跑
+- 要**整条方向图曲线**(单个已求解设计,增益 vs 角度)→ `get_radiation_pattern`:默认导 E面(φ=0)/H面(φ=90)两刀,返回 theta/gain 数组 + 峰值(CSV 自动落在 exports/,无需传路径);CP 天线传 `polarization='lhcp'/'rhcp'`
 
 ## 8. 参数扫描
 1. 变量必须先 `set_variable`
-2. `create_parametric_sweep`:**要远场指标必须传 `save_fields=True, save_mesh=True`**;只看 S 参数保留默认 false 省盘。返回值看 `save_status`,是 "set via ..." 才生效,"REQUESTED BUT NOT APPLIED" 立刻告诉用户
+2. `create_parametric_sweep`:**要远场指标必须传 `save_fields=True`**;只看 S 参数保留默认 false 省盘。返回值回显 `save_fields` 确认已生效;被扫变量原是表达式时会带 `pinned_to_numeric`(工具自动钉成纯数值,正常现象)
 3. `run_parametric_sweep`(阻塞,组合数多很久)
 4. `get_parametric_results` / `get_parametric_gain` / ... 取指标表
 

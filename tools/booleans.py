@@ -95,3 +95,111 @@ def intersect(ctx, objects, keep_originals=False):
     except Exception as e:
         return {"ok": False, "error": f"Intersect 失败: {type(e).__name__}: {e}"}
     return {"ok": True, "result": objects[0], "intersected": list(objects)}
+
+
+# ─────────────────────────────────────────────────────────
+# split —— 按坐标平面切割(oEditor.Split 直通)
+# 参数格式对照 PyAEDT modeler.split(primitives.py)核实。
+# AEDT 的切割平面只能过当前坐标系原点,所以非零 offset 用"平移→切→移回"实现。
+# ─────────────────────────────────────────────────────────
+
+_SPLIT_SIDE = {"positive": "PositiveOnly", "negative": "NegativeOnly", "both": "Both"}
+_PLANE_AXIS = {"XY": 2, "YZ": 0, "ZX": 1}
+
+
+def _all_names(oEditor):
+    try:
+        return set(oEditor.GetMatchedObjectName("*"))
+    except Exception:
+        return None
+
+
+def _translate(oEditor, names, axis_idx, expr):
+    v = ["0mm", "0mm", "0mm"]
+    v[axis_idx] = expr
+    oEditor.Move(
+        ["NAME:Selections", "Selections:=", _csv(names), "NewPartsModelFlag:=", "Model"],
+        ["NAME:TranslateParameters",
+         "TranslateVectorX:=", v[0], "TranslateVectorY:=", v[1], "TranslateVectorZ:=", v[2]],
+    )
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "split",
+        "description": (
+            "按坐标平面切割对象(实体或 sheet 都行),保留一侧或两侧。"
+            "plane=XY 表示平面 z=offset(法向 +Z),YZ → x=offset(法向 +X),ZX → y=offset(法向 +Y)。"
+            "keep='positive' 保留法向正侧,'negative' 保留负侧,'both' 两侧都留(新增部件名见返回)。"
+            "典型用法:把螺旋带/斜切带子的端头切成水平——顶端 split(plane='XY', offset='z_top', keep='negative'),"
+            "底端 split(plane='XY', offset='z_bot', keep='positive')。offset 可用变量表达式。"
+            "注意:sheet 不能被 solid 用 subtract 切(类型不匹配会失败并删掉 blank),要切 sheet 就用本工具。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "objects": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+                            "description": "要切的对象名列表"},
+                "plane": {"type": "string", "enum": ["XY", "YZ", "ZX"], "description": "切割平面方向"},
+                "offset": {"type": "string", "default": "0mm",
+                           "description": "平面沿其法向的位置,带单位或变量,如 '67mm'"},
+                "keep": {"type": "string", "enum": ["positive", "negative", "both"], "default": "negative",
+                         "description": "保留哪一侧"},
+            },
+            "required": ["objects", "plane"],
+        },
+    },
+})
+def split(ctx, objects, plane, offset="0mm", keep="negative"):
+    oEditor = ctx["oEditor"]
+    objects = [objects] if isinstance(objects, str) else list(objects)
+    if plane not in _PLANE_AXIS or keep not in _SPLIT_SIDE:
+        return {"ok": False, "error": f"plane 须为 XY/YZ/ZX,keep 须为 positive/negative/both(收到 {plane}/{keep})"}
+    axis_idx = _PLANE_AXIS[plane]
+    off = str(offset).strip()
+    shifted = off not in ("", "0", "0mm", "0.0mm", "0.0")
+    before = _all_names(oEditor)
+    moved = False
+    try:
+        if shifted:
+            _translate(oEditor, objects, axis_idx, f"-({off})")
+            moved = True
+        oEditor.Split(
+            ["NAME:Selections", "Selections:=", _csv(objects), "NewPartsModelFlag:=", "Model"],
+            ["NAME:SplitToParameters",
+             "SplitPlane:=", plane,
+             "WhichSide:=", _SPLIT_SIDE[keep],
+             "ToolType:=", "PlaneTool",
+             "ToolEntityID:=", -1,
+             "SplitCrossingObjectsOnly:=", False,
+             "DeleteInvalidObjects:=", True],
+        )
+    except Exception as e:
+        if moved:  # 切失败也要把对象移回原位,别留下错位几何
+            try:
+                _translate(oEditor, objects, axis_idx, f"({off})")
+            except Exception:
+                pass
+        return {"ok": False, "error": f"Split 失败: {type(e).__name__}: {e}"}
+
+    after = _all_names(oEditor)
+    if before is not None and after is not None:
+        new_parts = sorted(after - before)
+        survivors = [o for o in objects if o in after] + new_parts
+        removed = [o for o in objects if o not in after]
+    else:
+        new_parts, removed, survivors = [], [], list(objects)
+    if shifted and survivors:
+        try:
+            _translate(oEditor, survivors, axis_idx, f"({off})")
+        except Exception as e:
+            return {"ok": False, "error": f"Split 成功但移回原位失败: {type(e).__name__}: {e}",
+                    "hint": f"对象仍在 {plane} 法向上偏移了 -({off}),用 move 手动移回", "parts": survivors}
+    if "state" in ctx:
+        for o in removed:
+            ctx["state"].objects.pop(o, None)
+        for n in new_parts:
+            ctx["state"].objects.setdefault(n, {"type": "split_part"})
+    return {"ok": True, "plane": plane, "offset": off, "keep": keep,
+            "parts": survivors, "new_parts": new_parts, "removed": removed}

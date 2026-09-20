@@ -2,20 +2,16 @@
 
 做参数扫描/匹配/方向图优化时反复踩到的坑与方法论。开工要扫参/调匹配/优化方向图时先读这篇。
 
-## 参扫不能扫"表达式型"变量(代码已自动兜底)
-- 现象:`create_parametric_sweep` 扫值为表达式的变量(如 `0.1*109.1mm`、`MH1-0.01*lambda`)报 `InsertSetup(OptiParametric)` com_error,纯数值变量(如 `14.73mm`)却正常。
-- **代码已处理**:`create_parametric_sweep` 建参扫前自动把被扫的表达式变量钉成其求值后的纯数值(单位保留),返回里 `pinned_to_numeric` 列出被改的变量。无需再手动 `set_variable`。
-- 仅当返回里没 `pinned_to_numeric` 又仍 com_error 时,才手动 `set_variable` 成纯数值。改成纯数值不影响下游对它的引用。
-
-## 参扫有一组求解失败(代码已逐组容错)
-- 现象:某组合几何冲突没出解时,旧版 `get_parametric_*` 会因这一组让整份报告作废,连成功的组也读不出。
-- **代码已处理**:所有 `get_parametric_*` 现在逐组容错——跳过失败组、照常返回成功组,失败组进 `failed_variations`(并在 `results` 里带 `error`)。
-- 仍建议**扫前估极值**(对范围两端 `set_variable`→`get_object_bbox` 看越界/穿插),减少无谓失败组;失败组多到关键区间都没解时,再手动逐点 `set_variable`→`analyze`→`get_*`。
-
-## 参扫的 -10dB 带宽:看 n_resonances,别看外包络
-- 现象:双谐振没咬合时,S11 在中间某段冒到 -10dB 之上,外包络式的 `bw_low/high` 会把它当成一条连续宽带。
-- **代码已处理**:`get_parametric_results` 每组直接给 `n_resonances` 和(>1 时)逐段 `resonances`,`bw_-10dB_low/high` 只覆盖**基模那一段**而非整个外包络。
-- 用法:`n_resonances==1` 才是真连续宽带;`>1` 说明中间有洞,看 `resonances` 各段,别当超宽带。无需再为此逐组重跑 `get_s_parameters`。
+## 参扫的三个坑代码都已兜底,看返回字段即可(别退回手动 workaround)
+- **表达式型变量**(如 `0.1*109.1mm`、`MH1-0.01*lambda`)直接扫会 `InsertSetup(OptiParametric)` com_error。
+  `create_parametric_sweep` 建参扫前已自动把被扫变量钉成求值后的纯数值(单位保留),返回里 `pinned_to_numeric`
+  列出被改的变量 —— **不用再手动 `set_variable`**。只有返回里没 `pinned_to_numeric` 又仍 com_error 才手动钉。
+- **某组合求解失败**不再让整份报告作废:所有 `get_parametric_*` 逐组容错,跳过失败组照常返回成功组,
+  失败组进 `failed_variations`(`results` 里带 `error`)。仍建议**扫前估极值**(对范围两端 `set_variable`
+  → `get_object_bbox` 看越界/穿插)减少无谓失败组;失败组多到关键区间都没解时,再手动逐点 `set_variable`→`analyze`→`get_*`。
+- **-10dB 带宽看 `n_resonances`,别看外包络**:`get_parametric_results` 每组直接给 `n_resonances` 和(>1 时)
+  逐段 `resonances`,`bw_-10dB_low/high` 只覆盖**基模那一段**。`n_resonances==1` 才是真连续宽带;>1 说明中间有洞。
+  无需为此逐组重跑 `get_s_parameters`。
 
 ## 同会话内可秒回复用参扫的解
 - 现象:逐点读数时每次 `analyze` 都怕全程重算(~150–180s)。

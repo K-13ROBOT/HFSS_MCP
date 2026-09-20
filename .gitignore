@@ -32,3 +32,6 @@ settings.local.json
 
 # 打包产物
 *.zip
+
+# 手工编辑快照(git 已有历史,不入库)
+*.bak_*

@@ -218,3 +218,81 @@ def create_coax_feed_port(ctx, name, gnd, feed_x, feed_y, z_bottom, z_top,
         ctx["state"].excitations[name] = {"type": "LumpedPort", "kind": "coax_probe", "gnd": gnd,
                                           "pin": pin, "sheet": outer, "impedance": impedance}
     return {"ok": True, "name": name, "pin": pin, "port_sheet": outer, "impedance": impedance}
+
+
+# ─────────────────────────────────────────────────────────
+# create_wave_port —— 波导口(AssignWavePort 直通)
+# 与 lumped port 的分工:波导/需要模式分析用这个,端口面必须贴模型外边界
+# ─────────────────────────────────────────────────────────
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "create_wave_port",
+        "description": (
+            "在已建好的 sheet 上建波导端口(Wave Port,Driven Modal)。用于矩形/圆波导、SIW、"
+            "需要看高次模或要 de-embed 的馈线端面。"
+            "**端口 sheet 必须贴在模型外边界上**(封在求解域内部的面要用 create_lumped_port,"
+            "浮在内部的 wave port 求解会报错或给出无意义阻抗);**端口 sheet 不要赋 PE**。"
+            "积分线可选:单模且只看 S 参数可不给(num_modes=1 时 HFSS 自动定模);"
+            "要确定阻抗归一化方向或做多模分解时给 int_start→int_end(从参考导体指向激励侧)。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "端口名,如 'P1'"},
+                "sheet": {"type": "string", "description": "端口 sheet 对象名(须贴模型外边界)"},
+                "num_modes": {"type": "integer", "default": 1,
+                              "description": "求解模式数。基模传播用 1;要看高次模/多模分解才加大"},
+                "int_start": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3,
+                              "description": "可选:积分线起点 [x,y,z]。可用变量名或字面量,工具自动解析变量"},
+                "int_end": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3,
+                            "description": "可选:积分线终点 [x,y,z],与 int_start 成对给"},
+                "deembed_distance": {"type": "string",
+                                     "description": "可选:de-embed 距离(带单位),把参考面沿传播方向移进结构内"},
+            },
+            "required": ["name", "sheet"],
+        },
+    },
+})
+def create_wave_port(ctx, name, sheet, num_modes=1, int_start=None, int_end=None,
+                     deembed_distance=None):
+    oDesign = ctx["oDesign"]
+    use_int = int_start is not None and int_end is not None
+    if (int_start is None) != (int_end is None):
+        return {"ok": False, "error": "int_start / int_end 要么都给,要么都不给"}
+
+    modes = ["NAME:Modes"]
+    for i in range(1, int(num_modes) + 1):
+        mode = ["NAME:Mode" + str(i), "ModeNum:=", i, "UseIntLine:=", bool(use_int and i == 1)]
+        if use_int and i == 1:
+            s = _resolve_pt(oDesign, int_start)
+            e = _resolve_pt(oDesign, int_end)
+            mode += [["NAME:IntLine", "Start:=", list(s), "End:=", list(e)],
+                     "AlignmentGroup:=", 0, "CharImp:=", "Zpi"]
+        else:
+            mode += ["CharImp:=", "Zpi"]
+        modes.append(mode)
+
+    do_deembed = deembed_distance is not None
+    arg = ["NAME:" + name, "Objects:=", [sheet], "NumModes:=", int(num_modes),
+           "UseLineModeAlignment:=", False, "DoDeembed:=", do_deembed]
+    if do_deembed:
+        arg += ["DeembedDist:=", str(deembed_distance)]
+    arg += ["RenormalizeAllTerminals:=", True, modes,
+            "ShowReporterFilter:=", False, "ReporterFilter:=", [True] * int(num_modes),
+            "UseAnalyticAlignment:=", False]
+    try:
+        oDesign.GetModule("BoundarySetup").AssignWavePort(arg)
+    except Exception as e:
+        return {"ok": False, "error": f"AssignWavePort 失败: {type(e).__name__}: {e}",
+                "hint": "端口 sheet 须贴模型外边界且未赋 PE;sheet 名拼写、积分线是否落在 sheet 上也查一下"}
+    if "state" in ctx:
+        ctx["state"].excitations[name] = {"type": "WavePort", "sheet": sheet,
+                                          "num_modes": int(num_modes),
+                                          "int_line": [list(int_start), list(int_end)] if use_int else None}
+    out = {"ok": True, "name": name, "sheet": sheet, "num_modes": int(num_modes),
+           "int_line": use_int}
+    if do_deembed:
+        out["deembed_distance"] = deembed_distance
+    return out
