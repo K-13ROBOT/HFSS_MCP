@@ -30,20 +30,32 @@ def _to_unit_str(freq):
                 "frequency": {"type": "string", "description": "自适应频率,带单位(如 '2.4GHz')"},
                 "max_passes": {"type": "integer", "default": 10, "description": "最大自适应迭代,默认 10"},
                 "max_delta_s": {"type": "number", "default": 0.02, "description": "S 收敛阈值,默认 0.02"},
+                "frequencies": {"type": "array", "items": {"type": "string"},
+                                "description": "可选:多频点自适应(如 ['1.52GHz','1.672GHz']),每点都用 max_delta_s 判收敛,"
+                                               "此时 frequency 被忽略。双频/多频天线、尤其含窄带高Q 模时用它——"
+                                               "单频自适应只保证该频点收敛,离它远的窄谐振位置可能随网格漂移。"},
             },
             "required": ["name", "frequency"],
         },
     },
 })
-def create_setup(ctx, name, frequency, max_passes=10, max_delta_s=0.02):
+def create_setup(ctx, name, frequency, max_passes=10, max_delta_s=0.02, frequencies=None):
     oDesign = ctx["oDesign"]
+    if frequencies:
+        # 键名照 AEDT 2025.2 录制脚本(Nuhertz Dual8Ports.py):频点表是 NAME: 嵌套数组,
+        # 写成 "MultipleAdaptiveFreqsSetup:=" 键值对会被静默忽略,退化成 Broadband 2–20GHz
+        freq_args = ["SolveType:=", "MultiFrequency",
+                     ["NAME:MultipleAdaptiveFreqsSetup"] +
+                     [["NAME:AdaptAt", "Frequency:=", _to_unit_str(f), "Delta:=", float(max_delta_s)]
+                      for f in frequencies]]
+    else:
+        freq_args = ["SolveType:=", "Single",
+                     "Frequency:=", _to_unit_str(frequency),
+                     "MaxDeltaS:=", float(max_delta_s)]
     try:
         oModule = oDesign.GetModule("AnalysisSetup")
         oModule.InsertSetup("HfssDriven",
-            ["NAME:" + name,
-             "SolveType:=", "Single",
-             "Frequency:=", _to_unit_str(frequency),
-             "MaxDeltaS:=", float(max_delta_s),
+            ["NAME:" + name] + freq_args + [
              "MaximumPasses:=", int(max_passes),
              "MinimumPasses:=", 1,
              "MinimumConvergedPasses:=", 1,
@@ -66,7 +78,10 @@ def create_setup(ctx, name, frequency, max_passes=10, max_delta_s=0.02):
         return {"ok": False, "error": f"InsertSetup 失败: {type(e).__name__}: {e}"}
     if "state" in ctx:
         ctx["state"].setups[name] = {"frequency": frequency, "max_passes": max_passes, "sweeps": []}
-    return {"ok": True, "name": name, "frequency": frequency, "max_passes": max_passes}
+    out = {"ok": True, "name": name, "frequency": frequency, "max_passes": max_passes}
+    if frequencies:
+        out["frequencies"] = list(frequencies)
+    return out
 
 
 @tool({
@@ -344,14 +359,30 @@ def get_s_parameters(ctx, setup=None, sweep=None, port=None, summary_only=True, 
         setup = setups[0]
     sw_list = state.setups.get(setup, {}).get("sweeps", []) if state else []
     if sweep is None:
-        if not sw_list:
-            return {"ok": False, "error": f"setup '{setup}' 下无 sweep"}
-        sweep = sw_list[0]["name"]
+        if sw_list:
+            sweep = sw_list[0]["name"]
+        else:
+            # 重开工程/重启 server 后 state 为空,直接问 HFSS
+            try:
+                sweep = list(oDesign.GetModule("AnalysisSetup").GetSweeps(setup))[0]
+            except Exception:
+                sweep = None
+            if not sweep:
+                return {"ok": False, "error": f"setup '{setup}' 下无 sweep"}
     ports = list(state.excitations.keys()) if state else []
     if port is None:
         if not ports:
-            return {"ok": False, "error": "无端口"}
-        port = ports[0]
+            # 显式给了 expression 时 port 只是没用到的默认值,不该因此挡住
+            try:
+                ports = [e for e in oDesign.GetModule("BoundarySetup").GetExcitations()[::2]]
+            except Exception:
+                ports = []
+        if ports:
+            port = ports[0]
+        elif expression:
+            port = "?"
+        else:
+            return {"ok": False, "error": "无端口(请显式传 port 或 expression)"}
 
     soln = f"{setup} : {sweep}"
     expr = expression or f"dB(S({port},{port}))"
@@ -678,3 +709,88 @@ def get_radiation_pattern(ctx, setup=None, sweep="LastAdaptive", sphere="Sphere1
                      "n_points": len(thetas)})
     return {"ok": True, "setup": setup, "sphere": sphere, "gain_type": gain_type,
             "polarization": polarization, "metric": expr, "n_cuts": len(cuts), "cuts": cuts}
+
+
+def _results_dir_size(ctx):
+    """返回 (<design>.results 所在的 .aedtresults 目录, 字节数);取不到就 (None, None)。"""
+    import os
+    try:
+        oProject = ctx["oProject"]
+        d = _os_join(oProject.GetPath(), oProject.GetName() + ".aedtresults")
+    except Exception:
+        return None, None
+    if not os.path.isdir(d):
+        return d, None
+    total = 0
+    for root, _dirs, files in os.walk(d):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return d, total
+
+
+def _os_join(a, b):
+    import os
+    return os.path.join(str(a), str(b))
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "cleanup_solutions",
+        "description": ("清理已求解的解数据(对应 GUI 的 Clean Up Solutions),用来回收磁盘。"
+                        "**必须显式 confirm=true 才真删**(不带只回显结果目录当前占用,不动任何东西)。"
+                        "\n**`scope='fields'`(默认)只删场、保留 S 参数曲线** —— 场数据是几百 MB~几 GB/频点的大头,"
+                        "S 参数才几百 KB,所以调参阶段几乎总该用它:磁盘立刻回收,已画的 S 参数/带宽照样能取。"
+                        "\n`scope='all'` 连 S 参数一起删(整份解没了,要重跑);`scope='linked'` 只删外部链接数据。"
+                        "\n⚠️ 删场之后**远场量(增益/轴比/方向图)就取不到了**,要先把远场数据导出/取数完毕再清。"),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "scope": {"type": "string", "enum": ["fields", "all", "linked"], "default": "fields",
+                          "description": "fields=只删场保留S参数(推荐);all=整份解都删;linked=只删链接数据"},
+                "variations": {"type": "array", "items": {"type": "string"},
+                               "description": "要清的变量组合;省略=All(全部)"},
+                "keep_mesh": {"type": "boolean", "default": False,
+                              "description": "scope='fields' 时保留网格(下次同几何求解可复用,省自适应时间;但网格本身也占盘)"},
+                "confirm": {"type": "boolean", "default": False,
+                            "description": "必须显式传 true 才真正删除"},
+            },
+        },
+    },
+})
+def cleanup_solutions(ctx, scope="fields", variations=None, keep_mesh=False, confirm=False):
+    oDesign = ctx.get("oDesign")
+    if oDesign is None:
+        return {"ok": False, "error": "无 active design"}
+
+    d, before = _results_dir_size(ctx)
+    human = (lambda n: None if n is None else f"{n/1024/1024:.1f} MB")
+    vars_ = [str(v) for v in variations] if variations else ["All"]
+
+    if not confirm:
+        return {"ok": True, "results_dir": d, "size": human(before), "deleted": False,
+                "would_clean": {"scope": scope, "variations": vars_, "keep_mesh": keep_mesh},
+                "hint": ("带 confirm=true 再调一次才会真删。scope='fields' 保留 S 参数、只回收场数据;"
+                         "**删场后远场量取不到了**,先确认远场已取数/导出")}
+
+    try:
+        if scope == "all":
+            oDesign.DeleteFullVariation(vars_, True)
+        elif scope == "linked":
+            oDesign.DeleteLinkedDataVariation(vars_)
+        else:
+            oDesign.DeleteFieldVariation(vars_, not keep_mesh, True)
+    except Exception as e:
+        return {"ok": False, "error": f"清理解数据失败: {type(e).__name__}: {e}",
+                "results_dir": d, "size": human(before)}
+
+    _d2, after = _results_dir_size(ctx)
+    out = {"ok": True, "scope": scope, "variations": vars_, "results_dir": d,
+           "size_before": human(before), "size_after": human(after)}
+    if before and after is not None:
+        out["freed"] = human(max(before - after, 0))
+    out["hint"] = "磁盘回收可能要等 HFSS 落盘;删完记得 save_project"
+    return out

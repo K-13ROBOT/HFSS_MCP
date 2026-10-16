@@ -19,4 +19,6 @@
 
 - [vivaldi-tapered-slot.md](vivaldi-tapered-slot.md) — 渐变槽天线 Vivaldi/LTSA/CWSA（长度↔波束宽度标准曲线 + 基板 t_eff 容许区间 + 口径下限 λc=2W + 馈点 80Ω）
 
+- [quadrifilar-helix.md](quadrifilar-helix.md) — 四臂螺旋 QHA 寄生臂双频型（八个尺寸的 λ₀ 归一化常数 + 3λ/4 臂长族 + 相序决定宽瓣/定向两种用法 + 两副实测对标数据）
+
 <!-- 新拓扑:复制 _TEMPLATE.md → <type>.md,在此加一行指针 -->

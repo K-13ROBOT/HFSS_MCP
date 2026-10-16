@@ -34,7 +34,9 @@ description: >-
 **开工先读(解析结构 + 规划之前):**
 1. 认出这次是哪类天线(贴片 / 磁电偶极 / 缝隙耦合 / 偶极单极 / 阵列 …)。
 2. 读 `knowledge/INDEX.md` 找匹配条目 → 读对应 `knowledge/<type>.md` **和** `knowledge/_general.md`,把里面已知的难点纳入这次的结构理解与规划。
-3. 没有匹配类型文件 = 这类第一次做,正常,照常进行,**结束时新建**该类型文件。
+   另外两篇按任务性质**按需读**(别全量加载):要扫参/调匹配 → `knowledge/_optimization.md`;要跑长求解、或求解莫名变慢/失败 → `knowledge/_solving.md`(**调参期间工程里只留一个 setup** 这条在里面,违反它每轮白等几十分钟起)。
+3. **改结构/换拓扑/加一层之前,先把关键电尺寸比值算出来并排比**(有 `papers/` 原文库就回 `papers/INDEX.md` 查;**全新安装没有这个文件**——它是随使用攒出来的个人索引、不随分发走,此时就用手头论文或 `design/` 卡片的归一化常数比)(臂长/λ、层间距/λ、升角),对不上先解释清楚再决定要不要仿。一轮仿真几十分钟到几小时,查一次索引一分钟。比的是**电尺寸比值不是毫米数**——馈电方式不同,谐振长度族完全不同。
+4. 没有匹配类型文件 = 这类第一次做,正常,照常进行,**结束时新建**该类型文件。
 
 **收工先记(复杂任务做完、或中途卡过壳/绕过坑之后):**
 1. 把这次遇到的、**非显然且跨任务可复用**的难点,追加进对应 `knowledge/<type>.md`(没有该文件就新建,并在 `INDEX.md` 加一行指针)。
@@ -121,9 +123,15 @@ description: >-
 - **新任务先 `design_summary` 看全景**——用户说"仿真/扫参/取数据"时尤其要查,确认 setup/port/boundary 是否已存在,**不要重复创建**
 - 复杂结构先 `set_variable` 再用变量名建几何
 - 建错用 `delete_object` 删掉重建,不要堆叠;不确定就 `list_objects` / `list_variables`
+- `delete_design` 删整个设计(几何/边界/解全没),和 `new_design` 一样**永远别主动调**,只在用户明确要求时用
 - **setup / 扫频建错同样不能同名覆盖**(`create_sweep` 重名直接 com_error)——用 `delete_sweep` / `delete_setup` 删掉再重建。两者都要**显式 `confirm=true` 才真删**,不带 confirm 只回显清单,可以先拿它当"列出现有 setup 及其扫频"用
   - ⚠️ **删 setup/扫频 会连带删掉它已求解的结果,不可撤销**(删 setup 更狠:其下所有扫频与结果一起没)。删之前先确认要留的曲线**已经取过数或导出过 CSV**——重算一轮往往是几十分钟
   - 名字写错**整批不动**并回显现有清单,不会删一半;所以拿不准就先不带 confirm 调一次看清单,对完再删
+- **磁盘吃紧用 `cleanup_solutions` 回收解数据**(对应 GUI 的 Clean Up Solutions)。默认 `scope='fields'`——
+  **只删场、保留 S 参数曲线**:场数据是几百 MB~几 GB/频点的大头,S 参数才几百 KB,所以调参阶段几乎总该用它,
+  磁盘立刻回收而已有的 S11/带宽照常能取。`scope='all'` 才是连 S 参数一起删(等于要重跑)
+  - ⚠️ **删场之后远场量(增益/轴比/方向图)就取不到了** —— 先把远场取数/导出完毕再清
+  - 同样 `confirm=true` 才真删;不带 confirm 会回显结果目录当前占用,可当"看看现在占多少盘"用,删完回显 `freed`
 
 ## 5. 2D sheet → 导体规则
 - `create_rectangle` / `create_polyline` 是 2D sheet,本身不是导体
@@ -147,7 +155,7 @@ description: >-
 ## 5.6 进阶边界 / 材料 / 网格(按需,默认流程用不到)
 - **sheet 上的其它边界**:`assign_perfect_h`(磁壁 PMC)、`assign_finite_conductivity`(真实金属损耗,要算效率/Q 时替代 PE,传 material='copper')、`assign_impedance`(薄电阻片/吸波等效表面阻抗)、`assign_lumped_rlc`(集总 R/L/C 负载,要电流方向线 `current_start`→`current_end`)
 - **事后改/赋材料**:`assign_material`(给已建**实体**换材料;sheet 导体面用 assign_perfect_e)
-- **网格细化提精度**:`assign_mesh_length`(关键区域限最大边长)、`assign_mesh_surface`(圆柱/球等**曲面**结构的曲率细化 level 1-3)。默认自适应网格够用,**收敛慢/结果可疑时**才手动加
+- **网格细化提精度**:`assign_mesh_length`(关键区域限最大边长)、`assign_mesh_surface`(圆柱/螺旋/球等**曲面**的初始多边形逼近细化)。⚠️ **slider 的全局默认是 5、数字越大越细**——传 level=2 是在**变粗**,不是细化;**推荐直接传 `normal_dev`**(如 `'5deg'`,法向偏差,半径 R 的弦高≈R(1−cos(dev/2))),含义明确不易弄反。默认自适应网格够用,**窄缝/高 Q 模/收敛慢/结果可疑时**才手动加
 
 ## 5.7 螺旋结构(create_helix / split)
 四臂螺旋、单臂螺旋、螺旋带这类**沿圆柱面卷绕**的结构,一律用 `create_helix`,**不要用 polyline 平面片拼**
@@ -225,6 +233,11 @@ S 参数流程外加:
 
 参数扫描共用网格,比"循环改变量 + 多次 analyze"快得多。组合数=各变量取值数乘积,别盲目大范围。
 get_parametric_* 异常(只 1 个 variation、字段全空)时先让用户排查,**不要退化成手动循环**(会丢已跑结果)。
+
+⚠️ **参扫按 ID 引用求解 setup,不是按名字**:`delete_setup` 之后(哪怕马上同名重建)原参扫就成了孤儿——
+再跑报 `com_error(-2147024357)`,且 `validate_design` 会一直报 `<参扫名> - Need to include at least one simulation setup`。
+用 **`delete_parametric`** 清掉孤儿参扫(约定同 `delete_setup`:`confirm=true` 才真删、不传 names 只回显清单)。
+所以**要换 setup 就连参扫一起重建**,别指望同名接上。
 
 ## 9. 自动优化(用户说"优化/调到目标/找最优")
 两条路,先选对:

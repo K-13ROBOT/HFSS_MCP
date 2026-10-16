@@ -17,6 +17,20 @@ def _opti(ctx):
     return ctx["oDesign"].GetModule("Optimetrics")
 
 
+def _parametrics_of(ctx):
+    """HFSS 里现存的 Optimetrics 参扫名。取不到返回 None(区别于"取到了但一个都没有"的空列表)。"""
+    try:
+        oModule = _opti(ctx)
+    except Exception:
+        return None
+    for meth in ("GetSetupNames", "GetSetups"):
+        try:
+            return [str(x) for x in getattr(oModule, meth)()]
+        except Exception:
+            continue
+    return None
+
+
 @tool({
     "type": "function",
     "function": {
@@ -144,16 +158,92 @@ def _num(x):
         return None
 
 
-def _variations(ctx, name):
-    """返回 (变量名列表, [variation_dict,...] 笛卡尔积)。未知参扫返回 (None, None)。"""
+def _variations(ctx, name, setup=None):
+    """返回 (变量名列表, [variation_dict,...])。未知参扫返回 (None, None)。
+
+    优先用 state 里建参扫时记下的取值做笛卡尔积;**state 为空时(典型:重开工程后)
+    退回向 HFSS 反查已求解的 variation 列表** —— 否则重开工程后所有参扫结果都取不到。
+    """
     import itertools
     st = ctx.get("state")
-    if not (st and hasattr(st, "parametrics") and name in st.parametrics):
+    if st and hasattr(st, "parametrics") and name in st.parametrics:
+        vs = st.parametrics[name]["variables"]
+        names = [v["name"] for v in vs]
+        combos = [dict(zip(names, c)) for c in itertools.product(*[v["values"] for v in vs])]
+        return names, combos
+    # state 里没有 —— 可能是重开工程(该退回 HFSS 反查),也可能是名字写错。
+    # 不先核一下,写错名字会拿到 HFSS 里**任意**已解 variation 并当成这个参扫的结果返回。
+    existing = _parametrics_of(ctx)
+    if existing is not None and name not in existing:
         return None, None
-    vs = st.parametrics[name]["variables"]
-    names = [v["name"] for v in vs]
-    combos = [dict(zip(names, c)) for c in itertools.product(*[v["values"] for v in vs])]
-    return names, combos
+    return _variations_from_hfss(ctx, setup)
+
+
+def _variations_from_hfss(ctx, setup=None):
+    """从 HFSS 反查已求解的 variation(oDesign.GetVariations),解析成 (names, combos)。
+
+    GetVariations 返回形如 "Li='131mm' Ri='15mm'" 的字符串,每个已解组合一条。
+    只保留**在这些组合之间真正变化过**的变量(其余是固定量,不属于被扫变量)。
+    """
+    oDesign = ctx.get("oDesign")
+    if oDesign is None:
+        return None, None
+    setups = []
+    if setup:
+        setups = [setup]
+    else:
+        try:
+            setups = list(oDesign.GetModule("AnalysisSetup").GetSetups())
+        except Exception:
+            return None, None
+    # GetVariations 并非各版本都有;取不到时退到 AnalysisSetup.ListVariations
+    # (pyaedt 走的就是后者),两条都不通才放弃。
+    def _raw_for(sp):
+        try:
+            r = oDesign.GetVariations(str(sp))
+            if r:
+                return [str(v) for v in r]
+        except Exception:
+            pass
+        try:
+            mod = oDesign.GetModule("AnalysisSetup")
+        except Exception:
+            return []
+        for soln in (str(sp), f"{sp} : LastAdaptive"):
+            try:
+                r = mod.ListVariations(soln)
+                if r:
+                    return [str(v) for v in r]
+            except Exception:
+                continue
+        return []
+
+    raw = []
+    for sp in setups:
+        raw = _raw_for(sp)
+        if raw:
+            break
+    if not raw:
+        return None, None
+    combos = []
+    for line in raw:
+        d = dict(_re_mod.findall(r"([A-Za-z_]\w*)='([^']*)'", line))
+        if d:
+            combos.append(d)
+    if not combos:
+        return None, None
+    keys = set().union(*[set(c) for c in combos])
+    varying = sorted(k for k in keys if len({c.get(k) for c in combos}) > 1)
+    if not varying:                      # 只有一个组合时退化:全给出来
+        varying = sorted(combos[0])
+    combos = [{k: c[k] for k in varying if k in c} for c in combos]
+    seen, uniq = set(), []
+    for c in combos:
+        key = tuple(sorted(c.items()))
+        if key not in seen:
+            seen.add(key)
+            uniq.append(c)
+    return varying, uniq
 
 
 def _pin_fam(pin):
@@ -296,7 +386,7 @@ def _gain_expr(gain_type, pol):
         "required": ["parametric"]}}})
 def get_parametric_results(ctx, parametric, setup=None, sweep="LastAdaptive", port=None):
     st = ctx.get("state")
-    names, variations = _variations(ctx, parametric)
+    names, variations = _variations(ctx, parametric, setup)
     if not names:
         return {"ok": False, "error": f"参扫 '{parametric}' 未知或无变量"}
     setup = setup or (list(st.setups.keys())[0] if st and st.setups else None)
@@ -351,7 +441,7 @@ def _ff_metric(ctx, parametric, expr, sphere, setup, sweep, phi=None, reduce_fn=
     失败组 pts=[]、reduced=None);fails=[{variation, error}, ...]。
     硬错(参扫未知)返回 (None, err_str)。单组失败不再让整份报告作废。"""
     st = ctx.get("state")
-    names, variations = _variations(ctx, parametric)
+    names, variations = _variations(ctx, parametric, setup)
     if not names:
         return None, f"参扫 '{parametric}' 未知或无变量"
     setup = setup or (list(st.setups.keys())[0] if st and st.setups else None)
@@ -503,3 +593,73 @@ def get_parametric_cross_pol_isolation(ctx, parametric, co_pol, sphere="Sphere1"
                     "isolation_dB": round(max(co_bs) - max(cx_bs), 2) if co_bs and cx_bs else None})
     return _with_fails({"ok": True, "parametric": parametric, "n_variations": len(res), "results": res},
                        (f1 or []) + (f2 or []))
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "delete_parametric",
+        "description": ("删除参数扫描(Optimetrics Parametric setup)。"
+                        "**必须显式 confirm=true 才真删**(不带只回显现有参扫清单,不动任何东西);名字写错整批不动;"
+                        "删完要 save_project。**会连带删掉该参扫各组合的已求解结果。**\n"
+                        "主要用途:**参扫按 ID 引用求解 setup,不是按名字**——`delete_setup` 之后(哪怕同名重建)"
+                        "原参扫就成了孤儿,再跑报 com_error(-2147024357),且 `validate_design` 会一直报 "
+                        "`<参扫名> - Need to include at least one simulation setup`。用本工具清掉孤儿参扫。"),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "names": {"type": "array", "items": {"type": "string"},
+                          "description": "要删的参扫名列表;省略则只回显清单"},
+                "confirm": {"type": "boolean", "default": False,
+                            "description": "必须显式传 true 才真正删除"},
+            },
+        },
+    },
+})
+def delete_parametric(ctx, names=None, confirm=False):
+    oModule = _opti(ctx)
+    existing = _parametrics_of(ctx)
+    if existing is None:
+        return {"ok": False, "error": "取不到 Optimetrics 参扫清单(是否没有 active design?)"}
+
+    if not names:
+        return {"ok": True, "parametrics": existing, "deleted": [],
+                "hint": "传 names + confirm=true 才会删除;删参扫会连带丢掉各组合已求解结果"}
+
+    names = [str(n) for n in names]
+    missing = [n for n in names if n not in existing]
+    if missing:
+        return {"ok": False, "error": f"这些参扫不存在: {missing}",
+                "parametrics": existing, "hint": "名字写错则整批不动,核对后重试"}
+
+    if not confirm:
+        return {"ok": True, "parametrics": existing, "would_delete": names, "deleted": [],
+                "hint": "确认无误后带 confirm=true 再调一次才会真删(连带删掉各组合已求解结果)"}
+
+    deleted, failed = [], {}
+    for n in names:
+        ok = False
+        for meth, arg in (("DeleteSetups", [n]), ("DeleteSetup", n)):
+            try:
+                getattr(oModule, meth)(arg)
+                ok = True
+                break
+            except Exception as e:
+                last = f"{type(e).__name__}: {e}"
+        if ok:
+            deleted.append(n)
+        else:
+            failed[n] = last
+
+    state = ctx.get("state")
+    if state is not None and hasattr(state, "parametrics"):
+        for n in deleted:
+            state.parametrics.pop(n, None)
+
+    out = {"ok": not failed, "deleted": deleted, "remaining": _existing() or []}
+    if failed:
+        out["failed"] = failed
+        out["error"] = f"部分参扫删除失败: {list(failed)}"
+    else:
+        out["hint"] = "删完记得 save_project 才写进 .aedt"
+    return out

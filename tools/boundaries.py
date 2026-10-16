@@ -216,12 +216,20 @@ def assign_lumped_rlc(ctx, name, sheet, current_start, current_end, rlc_type="Pa
                       resistance=None, inductance=None, capacitance=None):
     if resistance is None and inductance is None and capacitance is None:
         return {"ok": False, "error": "R/L/C 至少给一个"}
+    # AEDT 要求 CurrentLine 里带 Coordinate System;R/L/C 值不能用科学计数法(3e-09H 解析失败),
+    # 统一换算成 ohm / nH / pF 的十进制字符串。
+    def _num(v):
+        return ("%.12f" % v).rstrip("0").rstrip(".") or "0"
     args = ["NAME:" + name, "Objects:=", [sheet],
-            ["NAME:CurrentLine", "Start:=", list(current_start), "End:=", list(current_end)],
+            ["NAME:CurrentLine", "Coordinate System:=", "Global",
+             "Start:=", list(current_start), "End:=", list(current_end)],
             "RLC Type:=", rlc_type,
-            "UseResist:=", resistance is not None, "Resistance:=", f"{resistance}ohm" if resistance is not None else "0ohm",
-            "UseInduct:=", inductance is not None, "Inductance:=", f"{inductance}H" if inductance is not None else "0H",
-            "UseCap:=", capacitance is not None, "Capacitance:=", f"{capacitance}F" if capacitance is not None else "0F"]
+            "UseResist:=", resistance is not None,
+            "Resistance:=", (_num(resistance) + "ohm") if resistance is not None else "0ohm",
+            "UseInduct:=", inductance is not None,
+            "Inductance:=", (_num(inductance * 1e9) + "nH") if inductance is not None else "0nH",
+            "UseCap:=", capacitance is not None,
+            "Capacitance:=", (_num(capacitance * 1e12) + "pF") if capacitance is not None else "0pF"]
     try:
         _bnd(ctx).AssignLumpedRLC(args)
     except Exception as e:

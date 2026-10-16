@@ -101,14 +101,19 @@ def assign_periodic_boundaries(ctx, unit_cell, scan_theta="0deg", scan_phi="0deg
         m_upos = _pt(lo, hi, {naxis: "lo", uaxis: "hi"})
         s_origin = _pt(lo, hi, {naxis: "hi"})
         s_upos = _pt(lo, hi, {naxis: "hi", uaxis: "hi"})
+        # 两个对面的外法线相反,同一 U 下 V=n×U 也相反 → slave 必须 ReverseV 才能映射上
+        # (否则报 "Unable to make a valid mapping ... using their UV axis definitions")。
+        # 键名对照 pyaedt assign_primary/assign_secondary:slave 用 ReverseV + PhaseDelay,不是 ReverseU/UseScanAngles。
         try:
             oM.AssignMaster(["NAME:" + mname, "Faces:=", [mfid],
-                             ["NAME:CoordSysVector", "Origin:=", m_origin, "UPos:=", m_upos],
+                             ["NAME:CoordSysVector", "Coordinate System:=", "Global",
+                              "Origin:=", m_origin, "UPos:=", m_upos],
                              "ReverseV:=", False])
             oM.AssignSlave(["NAME:" + sname, "Faces:=", [sfid],
-                            ["NAME:CoordSysVector", "Origin:=", s_origin, "UPos:=", s_upos],
-                            "ReverseU:=", False, "Master:=", mname,
-                            "UseScanAngles:=", True, "Phi:=", scan_phi, "Theta:=", scan_theta])
+                            ["NAME:CoordSysVector", "Coordinate System:=", "Global",
+                             "Origin:=", s_origin, "UPos:=", s_upos],
+                            "ReverseV:=", True, "Master:=", mname,
+                            "PhaseDelay:=", "UseScanAngle", "Phi:=", scan_phi, "Theta:=", scan_theta])
         except Exception as e:
             return {"ok": False, "error": f"配主从({mname}/{sname})失败: {type(e).__name__}: {e}"}
         done += [mname, sname]
@@ -166,16 +171,19 @@ def assign_floquet_port(ctx, name, unit_cell, side="+z", num_modes=2,
     b_end = _pt(lo, hi, {axis: face_side, inplane[1]: "hi"})
 
     n = max(1, int(num_modes))
-    modes = ["NAME:Modes"] + [["NAME:Mode" + str(i + 1), "ModeNum:=", i + 1, "UseIntLine:=", False]
+    modes = ["NAME:Modes"] + [["NAME:Mode" + str(i + 1), "ModeNum:=", i + 1, "UseIntLine:=", False,
+                               "CharImp:=", "Zpi"]
                               for i in range(n)]
+    # 晶格矢量键名是 Start/End(对照 pyaedt assign_floquet_port);写成 LatticeStartPoint 会被 AEDT
+    # 静默忽略 → 矢量退化为零,报 "The Floquet Port lattice vectors must be on the port face"。
     arg = ["NAME:" + name, "Faces:=", [fid], "NumModes:=", n,
            "RenormalizeAllTerminals:=", True,
            "DoDeembed:=", bool(deembed_mm), "DeembedDist:=", _mm(deembed_mm),
            modes,
            "ShowReporterFilter:=", False, "ReporterFilter:=", [True] * n,
            "UseScanAngles:=", True, "Phi:=", scan_phi, "Theta:=", scan_theta,
-           ["NAME:LatticeAVector", "LatticeStartPoint:=", a_start, "LatticeEndPoint:=", a_end],
-           ["NAME:LatticeBVector", "LatticeStartPoint:=", b_start, "LatticeEndPoint:=", b_end]]
+           ["NAME:LatticeAVector", "Coordinate System:=", "Global", "Start:=", a_start, "End:=", a_end],
+           ["NAME:LatticeBVector", "Coordinate System:=", "Global", "Start:=", b_start, "End:=", b_end]]
     try:
         _bnd(ctx).AssignFloquetPort(arg)
     except Exception as e:

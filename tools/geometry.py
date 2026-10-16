@@ -733,3 +733,48 @@ def thicken(ctx, objects, thickness, both_sides=False, material=None):
         if not r.get("ok"):
             out["material_warning"] = r.get("error")
     return out
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "create_circle",
+        "description": ("创建**真圆形 2D 面**(sheet),不是多边形逼近。用于圆地板、圆贴片、圆孔的 tool 对象等。"
+                        "本身不是导体——要当导体调 assign_perfect_e。坐标/半径为字符串带单位,**可用变量表达式**。"
+                        "此前工具集只有矩形和折线两种 sheet 原语,画圆地板只能用 N 边形近似;"
+                        "近似的边数若不是天线对称重数的整数倍会破坏旋转对称(圆极化轴比依赖它),用本工具可彻底避免。"),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "对象名"},
+                "center": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3,
+                           "description": "圆心 [x,y,z]"},
+                "radius": {"type": "string", "description": "半径,带单位"},
+                "axis": {"type": "string", "enum": ["X", "Y", "Z"], "default": "Z",
+                         "description": "圆面法向轴,默认 Z(圆在 XY 平面)"},
+                "material": {"type": "string", "default": "vacuum"},
+                "num_segments": {"type": "integer", "default": 0,
+                                 "description": "0=真圆(默认);>2 则生成该边数的正多边形"},
+            },
+            "required": ["name", "center", "radius"],
+        },
+    },
+})
+def create_circle(ctx, name, center, radius, axis="Z", material="vacuum", num_segments=0):
+    oEditor = ctx["oEditor"]
+    cx, cy, cz = [str(c) for c in center]
+    try:
+        oEditor.CreateCircle(
+            # IsCovered 必须显式给:不给则由 AEDT 默认决定成面还是线,
+            # 落到线上时 assign_perfect_e / subtract 会静默不起作用(同 CreateRectangle 的处理)
+            ["NAME:CircleParameters", "IsCovered:=", True,
+             "XCenter:=", cx, "YCenter:=", cy, "ZCenter:=", cz,
+             "Radius:=", str(radius), "WhichAxis:=", str(axis),
+             "NumSegments:=", str(int(num_segments))],
+            _attributes(name, material))
+    except Exception as e:
+        return {"ok": False, "error": f"CreateCircle 失败: {type(e).__name__}: {e}"}
+    if "state" in ctx:
+        ctx["state"].objects[name] = {"type": "circle", "material": material}
+    return {"ok": True, "name": name, "radius": radius, "axis": axis,
+            "num_segments": num_segments, "material": material}

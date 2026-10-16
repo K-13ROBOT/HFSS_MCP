@@ -53,7 +53,7 @@ def _register_duplicates(state, source_list, new_names):
         "name": "duplicate_along_line",
         "description": (
             "沿向量复制对象 N 份,做线阵列。n_clones=4 表示原 1 个 + 复制 3 个,**共 4 个**。"
-            "新对象自动继承源对象的材料和边界(PE 等),不需要重新赋。"
+            "新对象继承材料;**端口会跟着复制,但 PE 不会**(实测 PE 组仍只含源对象),复制完要对所有副本重新 assign_perfect_e。"
             "走 HFSS COM 直通,不依赖 PyAEDT cache,稳定。"
         ),
         "parameters": {
@@ -122,7 +122,7 @@ def duplicate_along_line(ctx, objects, vector, n_clones=2):
         "description": (
             "绕过原点的轴旋转复制 N 份,做圆阵列或螺旋臂。"
             "n_clones=8 + angle=45deg 表示 8 元均匀圆阵(360°/8=45°)。"
-            "新对象自动继承源对象的材料和边界。"
+            "新对象继承材料;PE 很可能同 duplicate_along_line 一样不随复制(未实测),复制完核对或对副本重新 assign_perfect_e。"
         ),
         "parameters": {
             "type": "object",
@@ -315,7 +315,7 @@ def rotate(ctx, objects, axis, angle):
                     "type": "array",
                     "items": {"type": "string"},
                     "minItems": 3, "maxItems": 3,
-                    "description": "镜像平面法向量 [nx, ny, nz],无单位。例 ['1','0','0'] 表示关于 YZ 平面镜像",
+                    "description": "镜像平面法向量 [nx, ny, nz],**要带长度单位**。例 ['1mm','0mm','0mm'] 表示关于 YZ 平面镜像",
                 },
             },
             "required": ["objects", "base", "normal"],
@@ -334,9 +334,12 @@ def mirror(ctx, objects, base, normal):
              "MirrorBaseX:=", str(base[0]),
              "MirrorBaseY:=", str(base[1]),
              "MirrorBaseZ:=", str(base[2]),
-             "MirrorNormalVecX:=", str(normal[0]),
-             "MirrorNormalVecY:=", str(normal[1]),
-             "MirrorNormalVecZ:=", str(normal[2])],
+             # 键名是 MirrorNormalX/Y/Z,不是 MirrorNormalVecX/Y/Z。
+             # 写错 AEDT 会静默忽略 -> 法向量退化成零 -> 报
+             # "MirrorParameters: Invalid vector: Start point and end point cannot be the same!"
+             "MirrorNormalX:=", str(normal[0]),
+             "MirrorNormalY:=", str(normal[1]),
+             "MirrorNormalZ:=", str(normal[2])],
         )
     except Exception as e:
         return {"ok": False, "error": f"Mirror COM 调用失败: {type(e).__name__}: {e}"}
