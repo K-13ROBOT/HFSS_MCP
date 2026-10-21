@@ -396,7 +396,7 @@ def get_s_parameters(ctx, setup=None, sweep=None, port=None, summary_only=True, 
     csv_path = os.path.join(EXPORTS_DIR, f"_{setup}_{sweep}_S.csv")
 
     # HFSS Modal:context 为空 [](对照 pyaedt standard report);families = ["Freq:=",["All"]];
-    # CreateReport 参数个数跨版本有差异,7 参(新)/6 参(老)都试,谁不抛就用谁。
+    # CreateReport 参数个数各版本不一致,7 参(新)/6 参(老)都试,谁不抛就用谁。
     oModule = oDesign.GetModule("ReportSetup")
     trace = ["X Component:=", "Freq", "Y Component:=", [expr]]
     forms = [
@@ -506,7 +506,7 @@ def get_s_parameters(ctx, setup=None, sweep=None, port=None, summary_only=True, 
 
 def _report_to_csv(oDesign, soln, exprs, csv_path):
     """多 arity CreateReport(re/im 等表达式)→ ExportToFile CSV。返回 (ok, err)。
-    跨版本:2019=8 参,2025=7 参,都试。"""
+    2019=8 参,2025=7 参,都试。"""
     oModule = oDesign.GetModule("ReportSetup")
     rname = "metrics_tmp"
     trace = ["X Component:=", "Freq", "Y Component:=", list(exprs)]

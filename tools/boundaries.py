@@ -267,7 +267,7 @@ def create_infinite_sphere(ctx, name="Sphere1", theta_start="0deg", theta_stop="
             "ThetaStart:=", theta_start, "ThetaStop:=", theta_stop, "ThetaStep:=", theta_step,
             "PhiStart:=", phi_start, "PhiStop:=", phi_stop, "PhiStep:=", phi_step,
             "UseLocalCS:=", False]
-    # 方法名跨版本不同:新版 InsertInfiniteSphereSetup,老版(2019)InsertFarFieldSphereSetup。都试。
+    # 方法名各版本不同:新版 InsertInfiniteSphereSetup,老版(2019)InsertFarFieldSphereSetup。都试。
     last = None
     for meth in ("InsertInfiniteSphereSetup", "InsertFarFieldSphereSetup"):
         try:

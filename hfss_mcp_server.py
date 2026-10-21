@@ -1,7 +1,7 @@
 """HFSS Agent —— MCP server 入口(native COM 版)。
 
 跟 gRPC 版同壳:stdio + 数据驱动 registry + dispatch 透传 + stdout 隔离。
-区别:ctx 持有 win32com 的 COM 句柄(oDesktop/oProject/oDesign/oEditor),连接走原生 API,跨版本。
+区别:ctx 持有 win32com 的 COM 句柄(oDesktop/oProject/oDesign/oEditor),连接走原生 API。
 """
 
 import sys

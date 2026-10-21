@@ -9,7 +9,7 @@
 辐射体上方/上下的真空盒,侧面主从、上下 Floquet。晶格矢量、面坐标全部从单元盒
 的包围盒自动推导(对象须是轴对齐长方体)。
 
-跨版本:用长期稳定的 AssignMaster/AssignSlave/AssignFloquetPort(2019 起可用;
+用长期稳定的 AssignMaster/AssignSlave/AssignFloquetPort(2019 起可用;
 新版 GUI 改叫 Primary/Secondary 但脚本名仍兼容)。COM 行为未在真机逐版本回归,
 首次用盯结果。
 """

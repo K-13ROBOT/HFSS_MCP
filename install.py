@@ -70,7 +70,7 @@ def print_instructions():
     print("  全局:  python install.py --skill-user")
     print("  单项目:python install.py --project <你的项目目录>")
     print(f"\n  提示:env 当前 = {dict(entry['env'])}")
-    print("  跨版本:默认连 HFSS_VERSION 那个版本;要连别的(如 2019.2)在对话里让 open_desktop 传 version='2019.2',")
+    print("  版本:默认连 HFSS_VERSION 那个版本;要连别的(如 2019.2)在对话里让 open_desktop 传 version='2019.2',")
     print("         或把 env 里的 HFSS_VERSION 改掉。")
 
 

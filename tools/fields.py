@@ -6,7 +6,7 @@
 
 走的是 ReportSetup 的 "Fields" 报告(context = 一条 polyline,PointCount 控采样密度),
 跟 analysis.py 里取 S 参数/远场是同一个路子:CreateReport → ExportToFile → 解析 CSV。
-不走 FieldsReporter 场计算器 —— 那个是有状态的压栈式 API,跨版本行为更不稳。
+不走 FieldsReporter 场计算器 —— 那个是有状态的压栈式 API,行为更不稳。
 
 **前提:必须有存场的解**(create_sweep 的 save_fields=True,或用 LastAdaptive 的自适应解)。
 场数据贵(实测 ~90-100 秒/点、几百 MB/点),所以场诊断只在**单频点**用,不跟扫频做,
@@ -39,7 +39,7 @@ def _design_var_families(oDesign):
 
 def _fields_report_to_csv(oDesign, soln, path, expr, point_count, freq, csv_path):
     """Fields 报告(沿 polyline 采样)→ ExportToFile CSV。返回 (ok, err)。
-    CreateReport 的 arity 跨版本不一致,照 analysis.py 的做法逐个试。"""
+    CreateReport 的 arity 各版本不一致,照 analysis.py 的做法逐个试。"""
     oModule = oDesign.GetModule("ReportSetup")
     rname = "_field_path_tmp"
     ctxt = ["Context:=", str(path), "PointCount:=", int(point_count)]

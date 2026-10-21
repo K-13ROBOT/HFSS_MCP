@@ -2,7 +2,7 @@
 
 跟 gRPC 版(hfss-mcp/)的区别:
 - 连接走 win32com 裸调 AEDT 原生脚本 API(oDesktop/oEditor/oModule),不依赖 PyAEDT,
-  因此跨版本(实测 2019.2 ~ 2025.2);
+  (实测 2019.2 ~ 2025.2 均可用);
 - ctx 持有的是 COM 句柄(oDesktop/oProject/oDesign/oEditor),不是 PyAEDT 的 Hfss 对象;
 - 不需要 NO_PROXY / pyaedt 日志静默(那些是 gRPC/pyaedt 专属)。
 """

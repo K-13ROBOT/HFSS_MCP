@@ -7,7 +7,7 @@
 - get_messages   : oDesktop.GetMessages(project, design, severity)
 - validate_design: oDesign.ValidateDesign() 的返回码 + 「调用前后消息差集」的合取。
 
-跨版本实测(2019.2 / 2025.2):
+实测(2019.2 / 2025.2):
 - 返回码:2025.2 给 Python bool、2019.2 给 int,bool() 之后语义一致(假=失败),两版都可信;
 - 消息窗口:2025.2 校验完立刻可读;**2019.2 写入滞后可达几十秒** —— 所以判定以返回码为主,
   消息只用来说明"错在哪";
@@ -45,7 +45,7 @@ def _clean(msg):
 
 
 def _raw_messages(oDesktop, project, design, severity):
-    """调 GetMessages,跨版本多形式 fallback。返回 (list[str], err)。"""
+    """调 GetMessages,多形式 fallback(各版本签名不一)。返回 (list[str], err)。"""
     forms = [
         (project, design, int(severity)),
         (project, design),
@@ -150,7 +150,7 @@ def validate_design(ctx):
         before, _ = _raw_messages(oDesktop, proj, dsn, 0)
 
     code, err = None, None
-    for meth in ("ValidateDesign", "ValidateCircuit"):   # 名字跨版本/产品线有别,都试
+    for meth in ("ValidateDesign", "ValidateCircuit"):   # 名字按版本/产品线有别,都试
         try:
             code = getattr(oDesign, meth)()
             err = None

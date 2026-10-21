@@ -1,4 +1,4 @@
-"""会话/连接(native COM 版)—— win32com 裸调 AEDT,跨版本。
+"""会话/连接(native COM 版)—— win32com 裸调 AEDT。
 
 连接路径(对照 PyAEDT 非 gRPC 后端,实测 2019.2 / 2025.2 均通):
     app = win32com.client.Dispatch("Ansoft.ElectronicsDesktop." + version)
@@ -80,7 +80,7 @@ def _alive(ctx):
     "type": "function",
     "function": {
         "name": "open_desktop",
-        "description": ("启动 HFSS 桌面(win32com 连接,跨版本)。用户说'打开/启动 HFSS'时调用。"
+        "description": ("启动 HFSS 桌面(win32com 连接)。用户说'打开/启动 HFSS'时调用。"
                         "调用后再 new_project / new_design 才能建模。version 默认取 HFSS_VERSION 环境变量。"),
         "parameters": {
             "type": "object",

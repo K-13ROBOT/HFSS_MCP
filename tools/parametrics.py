@@ -298,7 +298,7 @@ def _with_fails(resp, fails):
 
 def _param_report(oDesign, category, soln, context, families, trace, csv_path):
     """参扫报告 CreateReport(+context 远场)→ ExportToFile。返回 (ok, err)。
-    跨版本 8 参(老)/7 参(新)都试;真生成文件才算成功。"""
+    8 参(老)/7 参(新)都试;真生成文件才算成功。"""
     oM = oDesign.GetModule("ReportSetup")
     rn = "param_tmp"
     ctx_arg = ["Context:=", context] if context else []
