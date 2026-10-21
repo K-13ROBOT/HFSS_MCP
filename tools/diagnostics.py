@@ -191,3 +191,49 @@ def validate_design(ctx):
     elif rc is None and not new_msgs:
         out["note"] = "返回码类型未知且校验没产生新消息 —— 通常表示通过;拿不准用 get_messages 复核"
     return out
+
+
+# ─────────────────────────────────────────────────────────
+# design_summary —— 当前 design 全景(从 geometry.py 搬来:看全景、不改模型,
+# 跟 get_messages / validate_design 同属诊断,不属于几何)
+# 逐项 try:modeler 瞬时抽风时只让该字段带 _error,其余照常返回,别整份作废
+# ─────────────────────────────────────────────────────────
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "design_summary",
+        "description": ("当前 design 全景:对象(实体/片)、变量、边界、激励(端口)、setup。"
+                        "新任务/仿真/取数前先调,确认现状,别重复创建已有的。"),
+        "parameters": {"type": "object", "properties": {}},
+    },
+})
+def design_summary(ctx):
+    oEditor = ctx["oEditor"]
+    oDesign = ctx["oDesign"]
+    out = {"ok": True, "project": ctx.get("project_name"), "design": ctx.get("design_name")}
+
+    try:
+        out["solids"] = [str(n) for n in (oEditor.GetObjectsInGroup("Solids") or []) if n]
+        out["sheets"] = [str(n) for n in (oEditor.GetObjectsInGroup("Sheets") or []) if n]
+    except Exception as e:
+        out["objects_error"] = str(e)[:80]
+    try:
+        out["variables"] = {str(v): str(oDesign.GetVariableValue(v)) for v in (oDesign.GetVariables() or [])}
+    except Exception as e:
+        out["variables_error"] = str(e)[:80]
+    try:
+        b = list(oDesign.GetModule("BoundarySetup").GetBoundaries() or [])  # [name,type,name,type,...]
+        out["boundaries"] = [{"name": b[i], "type": b[i + 1]} for i in range(0, len(b) - 1, 2)]
+    except Exception as e:
+        out["boundaries_error"] = str(e)[:80]
+    try:
+        e2 = list(oDesign.GetModule("BoundarySetup").GetExcitations() or [])
+        out["excitations"] = [{"name": e2[i], "type": e2[i + 1]} for i in range(0, len(e2) - 1, 2)]
+    except Exception as e:
+        out["excitations_error"] = str(e)[:80]
+    try:
+        out["setups"] = [str(s) for s in (oDesign.GetModule("AnalysisSetup").GetSetups() or [])]
+    except Exception as e:
+        out["setups_error"] = str(e)[:80]
+    return out

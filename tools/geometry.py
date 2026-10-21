@@ -485,46 +485,6 @@ def create_material(ctx, name, permittivity, loss_tangent=0, permeability=1, con
             "hint": f"建几何时 material='{name}' 引用,或 assign_material 给已建实体"}
 
 
-@tool({
-    "type": "function",
-    "function": {
-        "name": "design_summary",
-        "description": ("当前 design 全景:对象(实体/片)、变量、边界、激励(端口)、setup。"
-                        "新任务/仿真/取数前先调,确认现状,别重复创建已有的。"),
-        "parameters": {"type": "object", "properties": {}},
-    },
-})
-def design_summary(ctx):
-    oEditor = ctx["oEditor"]
-    oDesign = ctx["oDesign"]
-    out = {"ok": True, "project": ctx.get("project_name"), "design": ctx.get("design_name")}
-
-    try:
-        out["solids"] = [str(n) for n in (oEditor.GetObjectsInGroup("Solids") or []) if n]
-        out["sheets"] = [str(n) for n in (oEditor.GetObjectsInGroup("Sheets") or []) if n]
-    except Exception as e:
-        out["objects_error"] = str(e)[:80]
-    try:
-        out["variables"] = {str(v): str(oDesign.GetVariableValue(v)) for v in (oDesign.GetVariables() or [])}
-    except Exception as e:
-        out["variables_error"] = str(e)[:80]
-    try:
-        b = list(oDesign.GetModule("BoundarySetup").GetBoundaries() or [])  # [name,type,name,type,...]
-        out["boundaries"] = [{"name": b[i], "type": b[i + 1]} for i in range(0, len(b) - 1, 2)]
-    except Exception as e:
-        out["boundaries_error"] = str(e)[:80]
-    try:
-        e2 = list(oDesign.GetModule("BoundarySetup").GetExcitations() or [])
-        out["excitations"] = [{"name": e2[i], "type": e2[i + 1]} for i in range(0, len(e2) - 1, 2)]
-    except Exception as e:
-        out["excitations_error"] = str(e)[:80]
-    try:
-        out["setups"] = [str(s) for s in (oDesign.GetModule("AnalysisSetup").GetSetups() or [])]
-    except Exception as e:
-        out["setups_error"] = str(e)[:80]
-    return out
-
-
 # ─────────────────────────────────────────────────────────
 # create_helix —— 轮廓绕轴扫成螺旋(oEditor.CreateHelix 直通)
 # 参数格式对照 PyAEDT modeler.create_helix(primitives_3d.py)核实
