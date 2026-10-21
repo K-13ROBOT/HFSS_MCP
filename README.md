@@ -13,7 +13,7 @@
 - 连接 = `win32com.Dispatch("Ansoft.ElectronicsDesktop." + version)`(ProgID 每个装机版本都注册),不卡 PyAEDT 版本下限,也不依赖 gRPC(2022R2+ 才有)。
 - 操作 = AEDT 原生脚本 API(宏录制那套),自 ~v15 稳定。
 
-## 能做什么(83 个工具)
+## 能做什么(84 个工具)
 
 | 域 | 能力 |
 |---|---|
@@ -24,6 +24,7 @@
 | **馈电** | 集总端口、**波导端口**(多模/de-embed)、边馈/微带(一步)、同轴探针(一步)——均验证能产出**真匹配**;**端口幅度/相位**(双馈 CP 90°、差分 180°、相控阵扫描) |
 | **周期单元** | 主从(Master/Slave)边界 + Floquet 端口(一步,晶格矢量自动推)——无限阵/FSS/超表面单元仿真,带扫描角 |
 | **求解 & 结果** | setup + 扫频 + analyze、**删 setup/扫频**(带 confirm 二次确认——建错不能同名覆盖,存场扫频堆着会让每轮求解从十几分钟涨到一两小时);S11/谐振/-10dB 带宽、**VSWR + 输入阻抗 Zin**、**远场方向图**、**轴比 AR vs 频率 + 3dB 轴比带宽** |
+| **场诊断** | `get_current_along_path`——沿 polyline 取表面电流分布 + 判据(模次 = 内部零点数+1、峰值位置、首尾衰减 dB)。补的是"只能测进去多少/出来多少、看不见结构上实际流了什么"这个盲区:失配不知往哪调、谐振对而方向图不对、寄生臂有没有被激励、行波辐射完没、弱接触,都靠它。**条件触发不是每次都看**,见 SKILL.md §6.9 |
 | **参数扫描** | 一次解全部组合 + 6 指标提取:S11 / 增益 / 轴比 / 前后比 / HPBW / 交叉极化隔离 |
 | **优化** | HFSS 内置优化器(自动迭代逼近目标) |
 | **工程卫生** | `cleanup_solutions` 回收解/场数据(对应 GUI 的 Clean Up Solutions)、`delete_setup` / `delete_sweep` / `delete_parametric` 清掉建错的和孤儿的——三个删除工具都是 `confirm=true` 才真删,不传 names 时只回显清单。**调参期工程里只留一个 setup**,存场扫频堆着会让每轮求解从十几分钟涨到一两小时 |
@@ -174,13 +175,13 @@ server 是标准 MCP stdio,**任何 MCP 客户端都能挂**(Claude Desktop、Cl
 }
 ```
 
-**兼容性已实测**(用通用 MCP SDK 客户端,非 Claude Code):协议版本 2024-11-05 / 2025-03-26 / 2025-06-18 都能正确协商降级;83 个工具 schema 全合规;返回统一 `TextContent` + UTF-8 JSON;stdout 做了 fd 级隔离。**cwd 由客户端决定**——落在不可写目录(如系统目录)时,`projects/`、`exports/`、`traces/` 会自动退到 `~/.hfss-agent/`,不会像以前那样在 initialize 之前就崩。
+**兼容性已实测**(用通用 MCP SDK 客户端,非 Claude Code):协议版本 2024-11-05 / 2025-03-26 / 2025-06-18 都能正确协商降级;84 个工具 schema 全合规;返回统一 `TextContent` + UTF-8 JSON;stdout 做了 fd 级隔离。**cwd 由客户端决定**——落在不可写目录(如系统目录)时,`projects/`、`exports/`、`traces/` 会自动退到 `~/.hfss-agent/`,不会像以前那样在 initialize 之前就崩。
 
 **长任务不再阻塞协议**:所有 COM 调用跑在一个专用线程上,事件循环全程空闲——实测 `analyze` 求解期间 `tools/list` 连续 9 次全部 <0.01s 返回。客户端的 ping/keepalive 不会超时,不会误判 server 已死而杀进程。但注意**两点仍然成立**:① `analyze` 这个请求本身就是几分钟,设了硬性单请求超时的客户端仍会在这一个调用上超时;② 求解**无法中途中止**(阻塞 COM 调用没有中断点),客户端发的 cancel 会被应答但求解照跑,后续调用排在它后面。
 
 换客户端会**丢两样 Claude Code 专属能力**,知道就行:
 
-1. **三个 skill 都不会自动加载**——那是 Claude 的 skill 机制,别的客户端不读。83 个工具照样能调,但丢了"怎么正确用"的纪律([skill 层](#skill-层三个)那一节的全部内容)。
+1. **三个 skill 都不会自动加载**——那是 Claude 的 skill 机制,别的客户端不读。84 个工具照样能调,但丢了"怎么正确用"的纪律([skill 层](#skill-层三个)那一节的全部内容)。
    - 变通:把 `skill/hfss-design/SKILL.md` 放进那个 agent 的 system prompt 当指南;要查文献或还原叠层再补 `skill/hfss-search/` 或 `skill/hfss-stackup/` 的 SKILL.md。
    - `design/` 卡片库不受影响——它由 `search_designs` / `read_design_card` 经 MCP 提供,任何客户端都取得到;`knowledge/` 和 `papers/` 则要靠那个 agent 自己有文件读取能力。
 2. **确认门**——如上,stdio 下进程内确认已关。客户端若没有工具授权 UI,`analyze`/扫参/优化会**直接跑、不问你**。用支持 MCP 工具授权的客户端,或自己留意别误触。

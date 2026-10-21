@@ -134,7 +134,12 @@ def create_sweep(ctx, setup, name, start_frequency, stop_frequency, num_points=4
         return {"ok": False, "error": f"InsertFrequencySweep 失败: {type(e).__name__}: {e}"}
     if "state" in ctx:
         ctx["state"].setups.setdefault(setup, {}).setdefault("sweeps", []).append(
-            {"name": name, "start": start_frequency, "stop": stop_frequency})
+            # save_fields / sweep_type 必须记进 state:下游取场的工具(get_current_along_path、
+            # get_axial_ratio)要靠它在发 COM 调用之前就判断"这条扫频有没有场可取"
+            {"name": name, "start": start_frequency, "stop": stop_frequency,
+             "sweep_type": sweep_type,
+             "save_fields": bool(save_fields),
+             "save_rad_fields": bool(save_rad_fields or save_fields)})
     return {"ok": True, "name": name, "setup": setup,
             "range": [start_frequency, stop_frequency], "points": num_points,
             "sweep_type": sweep_type,
