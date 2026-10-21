@@ -68,6 +68,8 @@ find <工程>.aedtresults/<design>.results -maxdepth 1 \
 - **不要发任何建模 COM 调用**。HFSS 的 COM 是串行的,求解期间的建模调用不只是排队,
   还可能打断求解器状态——实测求解期间调了一次 `new_design`,55 分钟后 **analyze 直接失败,整轮白跑**。
   求解期间只做不碰 HFSS 的事(本地算坐标、写文档、读论文)。
+  (曾怀疑"求解期间并行发只读调用如 bbox 也会打挂 analyze",但那次消息窗口的真实报错是求解子进程
+  起不来,**因果未证实**。稳妥做法仍是求解期间不发任何 COM 调用,但别把这当已验证的结论。)
 - **不要指望后台 shell 监视叫醒你**。求解进程吃满内存时,轮询式后台监视(PowerShell 轮询、
   `tasklist`、`ls`)会被系统"内存不足"杀掉(实测连续 3 次)。改用磁盘结果目录判断进度。
 
@@ -101,14 +103,6 @@ find <工程>.aedtresults/<design>.results -maxdepth 1 \
 旧工程要用老版 AEDT(如 2019)时,`attach_desktop`/`Dispatch` 可能完全连不上。
 退路:把工程复制一份,用 `ansysedt.exe -RunScriptAndExit <脚本>` 在副本上跑脚本。
 注意老版 `AddMessage` **只吃 ASCII**,脚本里别写中文日志。
-
-## 几何/边界类的零散坑
-- **参数化螺旋改变量后重建**,Parasolid 会报 `Unable to transport profile to correct sweep start position`,
-  实测 bbox 仍正确,判为无害——但**改完变量务必 bbox 自检**。
-- **集总 RLC 的电流方向线必须精确落在 sheet 的两条对边上**,容差很紧(~1e-3 mm 量级就报
-  `AssignLumpedRLC 失败`)。曲面片、以及"建好再 `rotate`"的斜平面片都给不出精确边点。
-  **可靠做法:跨接片建成 XY/XZ/YZ 轴对齐矩形**——它的对边是两个坐标为常数的直线,
-  电流线端点照建片时的字面量写即可精确落边。需要斜置时,宁可用"轴对齐平面去截曲面"来定位。
 
 ## ⚠️ 欠收敛的自适应会"吃掉"谐振——每轮必须核对末轮 ΔS
 - **现象**:同一几何扫长度,谐振位置高度非单调,中间几个取值**谐振整个消失**,看起来像物理突变。
@@ -149,12 +143,6 @@ find <工程>.aedtresults/<design>.results -maxdepth 1 \
   或等 15–30 分钟超时回收。
 - **预防**:**求解卡住优先 `close_desktop`(正常退出会归还 license)**,只有 COM 完全无响应时才强杀,
   并且要意识到每次强杀的代价是漏一个 seat。
-
-## 删对象后同名重建,HFSS 会自动改名(工具返回的是"请求名")
-删掉 `P1_pin` 等再用 `create_coax_feed_port` 重建同名对象,实际落盘的是 `P1_pin_2`——
-旧名在 undo 栈/历史里仍被占用。工具回显的是**传进去的名字**,不是 HFSS 用的名字。
-后续任何按名字操作(subtract/unite/assign)都会因此失败或作用到错误对象。
-⇒ **删除并重建同名对象之后,必须 `list_objects` 核对实际名字再往下走。**
 
 ## ★ 镜像等价:一条免费且精确的收敛性自检
 任何天线的**镜像体**与原体有严格恒等的 S 矩阵(只是端口按镜像置换重新编号);
@@ -251,3 +239,42 @@ C4 结构的 S 矩阵是循环阵,按顺序相位馈电时**四个口的 ActiveS
 - 开大阵前按"单元数 × 小阵收敛时的四面体/单元 × ~45KB"估内存,超了就换周期单元(无限阵)或缩阵。
 - 求解中**盯 hf3d 的 PrivateMemorySize 而不是 WorkingSet**(换页时 WorkingSet 只剩 1–3GB,看着很安全);
   超物理内存立刻 `Stop-Process hf3d`(AEDT 本体不死),MCP 的 analyze 随后返回 com_error(-2147024349)。
+
+## analyze 返回 com_error 时先读消息窗口:可能是求解器子进程起不来(hf3d / MPI)
+- 现象:`analyze` 跑了很久后返回 `com_error 发生意外`;消息窗口里是 `Unable to create child process: hf3d`、
+  `The attempted launch of solvers via MPI failed while connecting to communication pipes`、`The HFSS solver failed to start`,
+  常伴随 `Interpolating frequency sweep did NOT converge`(插值扫频阶段要反复拉起求解进程,最容易撞上)。
+- 判据:这是**求解进程启动失败**,不是模型/几何错误,也不一定是并发 COM 调用引起的——别急着改模型。
+- 补充(实测):同一 design 里反复出现(11:25、14:42 两次),资源充足(RAM 9GB 空闲、磁盘几十 GB)。
+  第二次 analyze 仍返回 ok、151 点数据完整,但耗时从 ~500s 拖到 ~2600s——**报错不一定让结果失效,
+  先看数据是否完整平滑,再决定要不要重跑**。
+- 排查:先看内存与磁盘余量;工程里开了很多 design、跑过大量求解时资源压力大。偶发的可直接重跑一次;
+  反复出现就存盘后重启 AEDT(`open_desktop` 重开),或减少扫频点数/改 Discrete 少点扫频降低进程启动次数。
+
+## ⚠️ `analyze` 返回 ok ≠ 这个 design 真的解好了
+- 现象:`analyze` 返回 `{"ok": true, "elapsed_sec": 14.7}`,后续取结果却全是空;
+  查 `.aedtresults/<design>.results` 只有 8KB(真解过的同规模工程是 2.8MB)。
+- 原因:**求解之后对几何做任何改动,HFSS 会把解整个作废**,而它只在**消息窗口**写一句
+  `Solutions have been invalidated. Undo to recover.` —— COM 层面不报错、不返回任何信号。
+  "改几何"的范围比直觉宽:**新画一条用来采样的 polyline 也算**。
+- 解法:取结果拿不到数时,**第一件事是 `get_messages`**,别去猜参数。
+  确认是解失效,就把几何改动做完再 `analyze` 一次。
+- 通用判据:怀疑某个 design 到底解没解,看 `.aedtresults/<design>.results` 的**目录大小**
+  —— 几 KB = 没解,几 MB 才是真有解和场。这个判据不依赖任何 API。
+
+## `attach_desktop` 连不上用 Dispatch 启动的 AEDT
+- 现象:`GetActiveObject` 报 `MK_E_UNAVAILABLE`(操作无法使用),但 `ansysedt.exe` 明明在跑。
+- 原因:COM Dispatch 启动的 AEDT 没把自己注册进运行对象表(ROT)。
+- 解法:用 `open_desktop`(走 `Dispatch`),它会接上已有实例,不会重复启动。
+
+## 取远场前先确认 setup 的自适应频率落在谐振点上,否则 realized gain 是失配假象
+- 现象:同一个天线,改了介质加载后重跑,`get_radiation_pattern` 的峰值增益从 +4.0 dBi 掉到 **−5.6 dBi**,
+  方向图也不再是预期形状(峰值跑偏、单调下降)。看着像天线被改坏了。
+- 原因:`get_radiation_pattern` 默认取 `LastAdaptive`,即 **setup 的自适应频率那一点**。
+  几何/材料一改,谐振点跟着移动,原来设的自适应频率可能落到了谐振之外——
+  **双频天线尤其危险,两个谐振之间就是失配峰**。realized gain 含失配损耗,自然塌掉。
+- 判据:把 `get_s_parameters` 返回的各谐振 `-10dB` 区间和 setup 频率对一下,
+  setup 频率不在任何一个区间内,远场就不能用。
+- 解法:**为每个要考察的谐振点新建一个 setup**(频率设在该谐振上)再 analyze,用它的 LastAdaptive 取远场。
+  顺手在该 setup 上挂一条 `Discrete + save_fields` 的扫频,一次求解同时拿到方向图和轴比曲线,省一轮。
+- 引申:realized gain 天生含失配。要看天线本身的方向性,别在失配频点上比较增益。
