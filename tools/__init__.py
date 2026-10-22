@@ -31,6 +31,7 @@ REQUIRES_CONFIRM = {
     "analyze",
     "run_parametric_sweep",
     "run_optimization",
+    "run_sensitivity",
 }
 _AUTOCONFIRM = os.environ.get("HFSS_AGENT_AUTOCONFIRM", "").lower() in ("1", "true", "yes")
 
