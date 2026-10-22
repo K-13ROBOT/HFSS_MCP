@@ -799,3 +799,152 @@ def cleanup_solutions(ctx, scope="fields", variations=None, keep_mesh=False, con
         out["freed"] = human(max(before - after, 0))
     out["hint"] = "磁盘回收可能要等 HFSS 落盘;删完记得 save_project"
     return out
+
+
+# ─────────────────────────────────────────────────────────
+# 本征模求解 —— InsertSetup("HfssEigen") + Solutions.ExportEigenmodes
+# 与驱动求解(HfssDriven)的根本区别:**不需要端口、不需要激励**,直接解出结构
+# 自身的谐振频率和 Q。腔体、介质谐振器(DRA)、周期结构的模式分析用它。
+# 参数结构照 AEDT 的 Tools→Record Script 录出来的官方调用(2025.2),不是猜的。
+# ⚠️ HfssEigen 的参数块与 HfssDriven 不同:没有 Frequency/MaxDeltaS/SaveAnyFields,
+#    换成 MinimumFrequency/NumModes/MaxDeltaFreq/ConvergeOnRealFreq,且多一个 MeshLink 块。
+# ─────────────────────────────────────────────────────────
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "create_eigenmode_setup",
+        "description": (
+            "建**本征模**求解设置(HfssEigen):不要端口、不要激励,直接解结构自身的谐振频率与 Q。"
+            "**design 必须是 Eigenmode 类型**(new_design 时传 solution_type='Eigenmode')。"
+            "什么时候用:腔体/滤波器谐振频率、介质谐振器天线(DRA)的模式、周期结构的本征模、"
+            "以及\"这个结构到底支持哪些模\"这类问题 —— 这些用驱动求解要先猜一个馈电位置,"
+            "猜错了模就激发不出来;本征模不存在这个问题。"
+            "建完直接用 analyze 跑(和驱动求解同一个工具),再用 get_eigenmodes 取结果。"
+            "**无耗结构(真空+PEC)的 Q 会返回 0**(表示无穷大);要算有意义的 Q,"
+            "材料得有损耗或壁用 assign_finite_conductivity。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Setup 名,如 'Setup1'"},
+                "min_frequency": {"type": "string",
+                                  "description": "从这个频率往上找模,带单位(如 '4GHz')。"
+                                                 "取略低于你预期的最低模;给太高会漏掉低阶模"},
+                "num_modes": {"type": "integer", "default": 1,
+                              "description": "求几个模,默认 1。简并模会各占一个名额"},
+                "max_passes": {"type": "integer", "default": 6, "description": "最大自适应迭代,默认 6"},
+                "max_delta_freq_pct": {"type": "number", "default": 10,
+                                       "description": "频率收敛判据(百分比),默认 10"},
+                "converge_on_real_freq": {"type": "boolean", "default": False,
+                                          "description": "只按实部收敛(高 Q 结构用),默认 False"},
+            },
+            "required": ["name", "min_frequency"],
+        },
+    },
+})
+def create_eigenmode_setup(ctx, name, min_frequency, num_modes=1, max_passes=6,
+                           max_delta_freq_pct=10, converge_on_real_freq=False):
+    oDesign = ctx["oDesign"]
+    try:
+        oDesign.GetModule("AnalysisSetup").InsertSetup("HfssEigen",
+            ["NAME:" + name,
+             "MinimumFrequency:=", _to_unit_str(min_frequency),
+             "NumModes:=", int(num_modes),
+             "MaxDeltaFreq:=", float(max_delta_freq_pct),
+             "ConvergeOnRealFreq:=", bool(converge_on_real_freq),
+             "MaximumPasses:=", int(max_passes),
+             "MinimumPasses:=", 1,
+             "MinimumConvergedPasses:=", 1,
+             "PercentRefinement:=", 30,
+             "IsEnabled:=", True,
+             ["NAME:MeshLink", "ImportMesh:=", False],
+             "BasisOrder:=", 1,
+             "DoLambdaRefine:=", True,
+             "DoMaterialLambda:=", True,
+             "SetLambdaTarget:=", False,
+             "Target:=", 0.2,
+             "UseMaxTetIncrease:=", False])
+    except Exception as e:
+        return {"ok": False, "error": f"InsertSetup(HfssEigen) 失败: {type(e).__name__}: {e}",
+                "hint": "这个 design 是 Eigenmode 类型吗?驱动类型的 design 建不了本征模 setup "
+                        "(new_design 时要传 solution_type='Eigenmode');另外同名 setup 不能覆盖"}
+    if "state" in ctx:
+        ctx["state"].setups[name] = {"frequency": min_frequency, "max_passes": max_passes,
+                                     "sweeps": [], "kind": "eigenmode", "num_modes": int(num_modes)}
+    return {"ok": True, "name": name, "min_frequency": min_frequency, "num_modes": int(num_modes),
+            "max_passes": max_passes,
+            "hint": "用 analyze 跑(和驱动求解同一个工具),再 get_eigenmodes 取结果"}
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "get_eigenmodes",
+        "description": (
+            "取本征模结果:各模的**谐振频率**和 **Q**。调用前必须已 analyze。"
+            "**Q=0 表示无耗**(真空+PEC 的理想腔体),不是出错 —— 要有意义的 Q,"
+            "材料得有损耗(tanδ)或壁用 assign_finite_conductivity。"
+            "返回里 `spacing_pct` 是相邻模的频率间隔(占低模的百分比):间隔很小说明两个模简并或接近简并,"
+            "做单模器件要留意它们会不会被同时激发。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "setup": {"type": "string", "description": "setup 名,不传用第一个"},
+            "sweep": {"type": "string", "default": "LastAdaptive"},
+            "path": {"type": "string", "description": "可选:.eig 文件落地路径,不传放 exports/"},
+        }},
+    },
+})
+def get_eigenmodes(ctx, setup=None, sweep="LastAdaptive", path=None):
+    oDesign = ctx["oDesign"]
+    state = ctx.get("state")
+    if setup is None:
+        setups = list(state.setups.keys()) if state else []
+        if not setups:
+            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup)"}
+        setup = setups[0]
+
+    from .session import EXPORTS_DIR
+    path = path or os.path.join(EXPORTS_DIR, f"_eig_{setup}.eig")
+    if os.path.exists(path):
+        os.remove(path)
+    try:
+        # 实测可用(2025.2):Solutions.ExportEigenmodes(soln, variation, file)。
+        # 本征模结果不走 ReportSetup,只有这个专用导出。
+        oDesign.GetModule("Solutions").ExportEigenmodes(f"{setup} : {sweep}", "", path)
+    except Exception as e:
+        return {"ok": False, "error": f"ExportEigenmodes 失败: {type(e).__name__}: {e}",
+                "hint": "这个 setup 跑过了吗(先 analyze)?是本征模 setup 吗(驱动求解没有本征模结果)?"}
+    if not os.path.exists(path) or os.path.getsize(path) < 20:
+        return {"ok": False, "error": "导出没产出内容,多半是还没有解", "hint": "先 analyze 再取"}
+
+    modes = []
+    for ln in open(path, encoding="utf-8", errors="replace"):
+        ln = ln.strip()
+        if not ln or ln.startswith("#"):
+            continue
+        parts = ln.split()
+        if len(parts) < 3:
+            continue
+        try:
+            modes.append({"mode": int(parts[0]), "freq_ghz": round(float(parts[1]), 6),
+                          "q": float(parts[2])})
+        except ValueError:
+            continue
+    if not modes:
+        return {"ok": False, "error": "解析不出本征模数据", "file": path}
+
+    for i in range(1, len(modes)):
+        lo = modes[i - 1]["freq_ghz"]
+        if lo:
+            modes[i]["spacing_pct"] = round((modes[i]["freq_ghz"] - lo) / lo * 100, 3)
+
+    out = {"ok": True, "setup": setup, "n_modes": len(modes), "modes": modes, "file": path}
+    if all(m["q"] == 0 for m in modes):
+        out["note_q"] = "所有 Q 都是 0 = 结构无耗(真空 + PEC)。要算真实 Q,给材料加 tanδ 或壁赋有限电导率。"
+    near = [m for m in modes if m.get("spacing_pct") is not None and abs(m["spacing_pct"]) < 1]
+    if near:
+        out["note_degenerate"] = (f"有 {len(near)} 处相邻模间隔 <1%,基本是简并模 —— "
+                                  "做单模器件要确认馈电不会把另一个一起激发。")
+    return out
