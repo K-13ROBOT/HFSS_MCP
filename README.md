@@ -6,7 +6,7 @@
 
 **连接全走 win32com 裸调 AEDT 原生脚本 API**(oDesktop/oEditor/oModule),**不依赖 PyAEDT**。实测 2019.2 和 2025.2 都通,PyAEDT/gRPC 够不到的老版本 HFSS(如 2019)也能驱动。
 
-**目录**:[为什么不依赖 PyAEDT](#为什么不依赖-pyaedt) · [能做什么](#能做什么92-个工具) · [skill 层](#skill-层三个) · [已验证](#已验证) · [安装](#安装) · [配置 & 用法](#配置--用法) · [用别的 MCP 客户端](#用别的-mcp-客户端) · [代码结构](#代码结构) · [当前短板](#当前短板) · [已知的版本差异](#已知的版本差异)
+**目录**:[为什么不依赖 PyAEDT](#为什么不依赖-pyaedt) · [能做什么](#能做什么92-个工具) · [skill 层](#skill-层三个) · [已验证](#已验证) · [安装](#安装) · [配置 & 用法](#配置--用法) · [用别的 MCP 客户端](#用别的-mcp-客户端) · [代码结构](#代码结构) · [已知的版本差异](#已知的版本差异)
 
 ## 为什么不依赖 PyAEDT
 
@@ -24,10 +24,11 @@
 | **馈电** | 集总端口、**波导端口**(多模/de-embed)、边馈/微带(一步)、同轴探针(一步)——均验证能产出**真匹配**;**端口幅度/相位**(双馈 CP 90°、差分 180°、相控阵扫描) |
 | **周期单元** | 主从(Master/Slave)边界 + Floquet 端口(一步,晶格矢量自动推)——无限阵/FSS/超表面单元仿真,带扫描角 |
 | **本征模** | `create_eigenmode_setup` + `get_eigenmodes`——不要端口、不要激励,直接解结构自身的谐振频率与 Q。腔体/滤波器/介质谐振器(DRA)/周期结构的模式分析;驱动求解要先猜馈电位置,猜错了模激发不出来,本征模没这问题。50×25×40mm 腔实测与解析解偏差 <0.02% |
-| **求解 & 结果** | setup + 扫频 + analyze、**删 setup/扫频**(带 confirm 二次确认——建错不能同名覆盖,存场扫频堆着会让每轮求解从十几分钟涨到一两小时);S11/谐振/-10dB 带宽、**VSWR + 输入阻抗 Zin**、**远场方向图**、**轴比 AR vs 频率 + 3dB 轴比带宽** |
+| **求解 & 结果** | setup + 扫频 + analyze(驱动求解);S11/谐振/-10dB 带宽、**VSWR + 输入阻抗 Zin**、**远场方向图**、**轴比 AR vs 频率 + 3dB 轴比带宽** |
 | **场诊断** | `get_current_along_path`——沿 polyline 取表面电流分布 + 判据(模次 = 内部零点数+1、峰值位置、首尾衰减 dB)。补的是"只能测进去多少/出来多少、看不见结构上实际流了什么"这个盲区:失配不知往哪调、谐振对而方向图不对、寄生臂有没有被激励、行波辐射完没、弱接触,都靠它。**条件触发不是每次都看**,见 SKILL.md §6.9 |
 | **参数扫描** | 一次解全部组合 + 6 指标提取:S11 / 增益 / 轴比 / 前后比 / HPBW / 交叉极化隔离 |
-| **优化** | HFSS 内置优化器(自动迭代逼近目标);**灵敏度分析**——在工作点算各变量对指标的偏导,扫参前先问"该动哪个",权重远小于 1 的变量直接固定,省掉大半机时;**公差/良率**——给变量加加工公差分布跑蒙特卡洛,直接出指标分布与良率,回答"按这个公差投产能做出来吗" |
+| **优化** | HFSS 内置优化器:给代价表达式和目标值,求解器自己梯度/遗传迭代,写回最优变量 |
+| **设计分析** | **灵敏度**——在工作点算各变量对指标的偏导,扫参前先问"该动哪个";权重远小于 1 的变量直接固定,省掉大半机时。**公差/良率**——加工公差分布跑蒙特卡洛,出指标分布与良率,回答"按这个公差投产能做出来吗"。两者是同一个偏导的两面:前者问动哪个旋钮,后者问旋钮抖动时结果散多少 |
 | **工程卫生** | `cleanup_solutions` 回收解/场数据(对应 GUI 的 Clean Up Solutions)、`delete_setup` / `delete_sweep` / `delete_parametric` 清掉建错的和孤儿的——三个删除工具都是 `confirm=true` 才真删,不传 names 时只回显清单。**调参期工程里只留一个 setup**,存场扫频堆着会让每轮求解从十几分钟涨到一两小时 |
 | **辅助设计** | `search_designs` / `list_design_cards` / `read_design_card`——按指标检索 `skill/.../design/` 设计卡片并**经 MCP 取回正文**拿起手尺寸;`check_design_targets`——实测 vs 目标逐项对标判定(指标驱动设计闭环的终止门) |
 
@@ -193,8 +194,8 @@ server 是标准 MCP stdio,**任何 MCP 客户端都能挂**(Claude Desktop、Cl
 hfss_mcp_server.py   MCP stdio 入口:常驻 ctx 持有 COM 句柄(oDesktop/oProject/oDesign/oEditor)
 tools/__init__.py    工具注册表(@tool 装饰器)+ dispatch:前置校验、确认门、trace 落盘
 tools/*.py           按域分文件:session / geometry / booleans / transforms / variables /
-                     boundaries / excitations / sources / analysis / axialratio / mesh /
-                     parametrics / optimization / periodic / diagnostics / design
+                     boundaries / excitations / sources / analysis / axialratio / fields /
+                     mesh / parametrics / optimization / periodic / diagnostics / design
 model_state.py       Agent 侧的模型状态镜像(对象/变量/边界/激励/setup),供 design_summary 等用
 install.py           打印/写入 MCP 配置 + 安装 skill(不改全局 ~/.claude.json)
 smoke_mcp.py         不启 HFSS 的 stdio 冒烟:工具能否注册、协议往返是否干净
@@ -209,19 +210,6 @@ skill/hfss-stackup/               PCB 叠层还原 skill
     SKILL.md         dump 表格→解析行业约定→总厚自校验→出层表确认→参数化建模
                      (install.py 遍历 skill/ 下每个含 SKILL.md 的目录,三个一起装)
 ```
-
-## 当前短板
-
-1. **最弱的是"读图/理解复杂结构"那半边,不是建模管线**。折叠/多层/定制馈电这类复杂拓扑,AI 从图反推容易错,仍要靠用户确认结构(skill §0 已尽量兜底)。
-2. `analyze` 求解**无法中途中止**(阻塞 COM 调用无中断点)。协议层已不受影响(COM 走专用线程,事件循环空闲),但求解本身停不下来。
-3. 经验库还年轻(随用随厚)。
-4. 工具偏多,每轮 token 有成本(数量见[能做什么](#能做什么72-个工具)那张表)。
-
-## 未来方向
-
-- **近期(打磨)**:拿真论文端到端跑通"读图→建模";经验库随用沉淀。
-- **中期(补能力)**:更多馈电/结构类型、场图/电流分布导出、工具按需收敛降 token。
-- **远期愿景(设计顾问)**:从"照着建"进化到"参考文献辅助设计"——给指标/参考论文,它建议结构+尺寸并实现、仿真、迭代到达标;底层靠 λ 归一化设计卡片库 + 经验库。
 
 ## 已知的版本差异
 
