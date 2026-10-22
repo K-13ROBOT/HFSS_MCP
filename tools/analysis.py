@@ -169,12 +169,9 @@ def _sweeps_of(oDesign, setup):
     "type": "function",
     "function": {
         "name": "delete_sweep",
-        "description": ("删除 setup 上的扫频。**`create_sweep` 不能同名覆盖**(会报 com_error),扫频参数建错了"
-                        "只能先用本工具删掉再重建。另一个重要用途:**调参阶段清掉存场扫频**——"
-                        "每条扫频都会在之后每次 analyze 里重算,存场频点每个要写完整三维场(实测约 90-100 秒/点、"
-                        "几百 MB/点),堆几条下来单轮求解能从十几分钟涨到一两个小时。"
-                        "**必须显式 confirm=true 才真删**(不带只回显该 setup 现有扫频清单,不动任何东西)。"
-                        "名字写错则整批不动。注意:删扫频会同时丢掉它已求解的结果数据。"),
+        "description": ("删除 setup 上的扫频。`create_sweep` 不能同名覆盖,建错了只能先删再重建。"
+            "**必须显式 confirm=true 才真删**(不带只回显该 setup 现有扫频清单);名字写错则整批不动。"
+            "⚠️ 删扫频会同时丢掉它已求解的结果数据。调参阶段为什么要主动清存场扫频,见 SKILL.md §6 第 7 步。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -237,12 +234,10 @@ def delete_sweep(ctx, setup, names=None, confirm=False):
     "type": "function",
     "function": {
         "name": "delete_setup",
-        "description": ("删除求解 setup。探索阶段容易堆一堆试出来的 setup(轻量调参的、单频取场的、不同自适应频点的),"
-                        "留着会拖慢工程加载与存盘、也容易误取到旧结果。"
-                        "**必须显式 confirm=true 才真删**(不带只回显现有 setup 清单及各自的扫频,不动任何东西)。"
-                        "名字写错则整批不动。"
-                        "**注意:删 setup 会连带删掉它下面的所有扫频和已求解的结果数据,不可撤销**——"
-                        "删之前先确认要保留的曲线已经取过数/导出过。"),
+        "description": ("删除求解 setup。**必须显式 confirm=true 才真删**(不带只回显现有 setup 清单及各自的扫频);"
+            "名字写错则整批不动。⚠️ **删 setup 会连带删掉其下所有扫频和已求解结果,不可撤销** —— "
+            "删之前先确认要保留的曲线已经取过数。注意参扫是按 ID 引用 setup 的,删了再同名重建也接不上"
+            "(见 SKILL.md §8,要用 delete_parametric 清孤儿参扫)。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -745,12 +740,10 @@ def _os_join(a, b):
     "type": "function",
     "function": {
         "name": "cleanup_solutions",
-        "description": ("清理已求解的解数据(对应 GUI 的 Clean Up Solutions),用来回收磁盘。"
-                        "**必须显式 confirm=true 才真删**(不带只回显结果目录当前占用,不动任何东西)。"
-                        "\n**`scope='fields'`(默认)只删场、保留 S 参数曲线** —— 场数据是几百 MB~几 GB/频点的大头,"
-                        "S 参数才几百 KB,所以调参阶段几乎总该用它:磁盘立刻回收,已画的 S 参数/带宽照样能取。"
-                        "\n`scope='all'` 连 S 参数一起删(整份解没了,要重跑);`scope='linked'` 只删外部链接数据。"
-                        "\n⚠️ 删场之后**远场量(增益/轴比/方向图)就取不到了**,要先把远场数据导出/取数完毕再清。"),
+        "description": ("清理已求解的解数据(对应 GUI 的 Clean Up Solutions),回收磁盘。"
+                        "**必须显式 confirm=true 才真删**(不带只回显结果目录占用)。"
+                        "scope: fields(默认)只删场留 S 参数 / all 连 S 参数一起删(要重跑)/ linked 只删外部链接。"
+                        "什么时候清、清完有什么取不到,见 SKILL.md §3。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -815,16 +808,10 @@ def cleanup_solutions(ctx, scope="fields", variations=None, keep_mesh=False, con
     "type": "function",
     "function": {
         "name": "create_eigenmode_setup",
-        "description": (
-            "建**本征模**求解设置(HfssEigen):不要端口、不要激励,直接解结构自身的谐振频率与 Q。"
-            "**design 必须是 Eigenmode 类型**(new_design 时传 solution_type='Eigenmode')。"
-            "什么时候用:腔体/滤波器谐振频率、介质谐振器天线(DRA)的模式、周期结构的本征模、"
-            "以及\"这个结构到底支持哪些模\"这类问题 —— 这些用驱动求解要先猜一个馈电位置,"
-            "猜错了模就激发不出来;本征模不存在这个问题。"
-            "建完直接用 analyze 跑(和驱动求解同一个工具),再用 get_eigenmodes 取结果。"
-            "**无耗结构(真空+PEC)的 Q 会返回 0**(表示无穷大);要算有意义的 Q,"
-            "材料得有损耗或壁用 assign_finite_conductivity。"
-        ),
+        "description": ("建**本征模**求解设置(HfssEigen):不要端口、不要激励,直接解结构自身的谐振频率与 Q。"
+            "**design 必须是 Eigenmode 类型**(new_design 时传 solution_type='Eigenmode'),"
+            "驱动类型的 design 建不了。min_frequency 取略低于预期最低模(给高了会漏掉低阶模)。"
+            "建完用 analyze 跑(与驱动求解同一个工具),再 get_eigenmodes 取结果。用法见 SKILL.md §6.4。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -882,13 +869,8 @@ def create_eigenmode_setup(ctx, name, min_frequency, num_modes=1, max_passes=6,
     "type": "function",
     "function": {
         "name": "get_eigenmodes",
-        "description": (
-            "取本征模结果:各模的**谐振频率**和 **Q**。调用前必须已 analyze。"
-            "**Q=0 表示无耗**(真空+PEC 的理想腔体),不是出错 —— 要有意义的 Q,"
-            "材料得有损耗(tanδ)或壁用 assign_finite_conductivity。"
-            "返回里 `spacing_pct` 是相邻模的频率间隔(占低模的百分比):间隔很小说明两个模简并或接近简并,"
-            "做单模器件要留意它们会不会被同时激发。"
-        ),
+        "description": ("取本征模结果:各模的**谐振频率**和 **Q**,外加相邻模间隔 spacing_pct。调用前必须已 analyze。"
+            "**Q=0 表示无耗**(真空+PEC 的理想腔体),不是出错。结果怎么读见 SKILL.md §6.4。"),
         "parameters": {"type": "object", "properties": {
             "setup": {"type": "string", "description": "setup 名,不传用第一个"},
             "sweep": {"type": "string", "default": "LastAdaptive"},

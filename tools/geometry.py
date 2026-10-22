@@ -164,10 +164,9 @@ def _bbox_of(oEditor, name):
     "type": "function",
     "function": {
         "name": "get_object_bbox",
-        "description": ("取对象的轴向包围盒(xyz 最小/最大,模型单位默认 mm)——**求解前自检层叠/搭接的关键工具**。"
-                        "不传 name 则返回所有对象的盒。用来核对:贴片底面 z == 基板顶面 z(不悬空)、"
-                        "馈电面 z 跨满基板高度且 xy 落在导体之间(搭接)、地板/空气盒包住辐射体。"
-                        "曲面体(球/圆柱)可能取不到顶点而返回 null,长方体/矩形片/多边形片都准。"),
+        "description": ("取对象的轴向包围盒(xyz 最小/最大,模型单位默认 mm)。不传 name 则返回所有对象的盒。"
+            "曲面体(球/圆柱)可能取不到顶点而返回 null,长方体/矩形片/多边形片都准。"
+            "求解前该拿它核对哪些项,见 SKILL.md §6 第 6 步。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -494,15 +493,11 @@ def create_material(ctx, name, permittivity, loss_tangent=0, permeability=1, con
     "type": "function",
     "function": {
         "name": "create_helix",
-        "description": (
-            "把一个轮廓对象绕轴扫成螺旋:1D 线 → 螺旋面(sheet),2D 面 → 螺旋实体。"
-            "轮廓对象被原地替换,结果保留原名(材料/后续赋 PE 照常)。"
+        "description": ("把一个轮廓对象绕轴扫成螺旋:1D 线 → 螺旋面(sheet),2D 面 → 螺旋实体。"
+            "轮廓对象被**原地替换**,结果保留原名(材料/后续赋 PE 照常)。"
             "轴 = center(轴上一点)+ axis_dir(方向向量);pitch = 每圈沿轴前进的距离;turns = 圈数(可小数)。"
             "所有长度与圈数都可用设计变量表达式 → 螺旋结构可直接参扫/优化。"
-            "四臂螺旋/螺旋带:在圆柱面上(如 x=r0 处)画一条竖直短线作轮廓(create_polyline,"
-            "close_surface=False, cover_surface=False),扫一次得到恒定带宽的真螺旋面,"
-            "再 duplicate_around_axis 出多臂。端头需要水平时用 split 按 XY 平面切。"
-        ),
+            "适用范围与建法见 SKILL.md §5.7。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -648,14 +643,9 @@ def set_object_color(ctx, names=None, color=None, transparency=None):
     "type": "function",
     "function": {
         "name": "thicken",
-        "description": (
-            "把 sheet **原地**加厚成 3D 实体(介质基板、金属块、墙体等),结果保留原对象名。"
-            "加厚方向 = sheet 法线;`both_sides=True` 则以 sheet 为中面向两侧各加厚 thickness。"
-            "厚度可用设计变量表达式(如 'subH')→ 加厚后的实体能直接参扫。"
-            "**规则长方体基板直接 create_box 更省事**,只有不规则截面(多边形、异形轮廓)才走"
-            "「create_polyline 画 sheet → thicken」。"
-            "**零厚度辐射金属面(贴片/振子/地板)不要 thicken**——用 assign_perfect_e,网格轻得多。"
-        ),
+        "description": ("把 sheet **原地**加厚成 3D 实体,结果保留原对象名。加厚方向 = sheet 法线;"
+            "both_sides=True 则以 sheet 为中面向两侧各加厚 thickness。厚度可用设计变量表达式。"
+            "什么时候用它、什么时候直接 create_box,见 SKILL.md §5。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -700,9 +690,8 @@ def thicken(ctx, objects, thickness, both_sides=False, material=None):
     "function": {
         "name": "create_circle",
         "description": ("创建**真圆形 2D 面**(sheet),不是多边形逼近。用于圆地板、圆贴片、圆孔的 tool 对象等。"
-                        "本身不是导体——要当导体调 assign_perfect_e。坐标/半径为字符串带单位,**可用变量表达式**。"
-                        "此前工具集只有矩形和折线两种 sheet 原语,画圆地板只能用 N 边形近似;"
-                        "近似的边数若不是天线对称重数的整数倍会破坏旋转对称(圆极化轴比依赖它),用本工具可彻底避免。"),
+            "本身不是导体 —— 要当导体调 assign_perfect_e。坐标/半径为字符串带单位,可用变量表达式。"
+            "为什么别用多边形凑圆,见 SKILL.md §5。"),
         "parameters": {
             "type": "object",
             "properties": {

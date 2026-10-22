@@ -34,14 +34,10 @@ def _match(name, available):
     "type": "function",
     "function": {
         "name": "set_port_excitation",
-        "description": (
-            "设置各端口激励的**幅度与相位**(默认全部 1W/0deg)。"
-            "做**双馈 CP**(正交双探针 + 90° 电桥)必须用它把一个口设成 90deg,否则远场轴比算的是同相馈电、不是实际结果;"
-            "差分馈电(180deg)、相控阵扫描同理。"
-            "**全量替换语义**:没在 sources 里列出的端口会被补成 1W/0deg。"
-            "设完直接取远场(get_axial_ratio / get_radiation_pattern)即可,不需要重新 analyze"
-            "(改的是后处理叠加权重,不是求解本身)。"
-        ),
+        "description": ("设置各端口激励的**幅度与相位**(默认全部 1W/0deg)。"
+            "⚠️ **全量替换语义**:没在 sources 里列出的端口会被补成 1W/0deg,别只列要改的那个。"
+            "改的是后处理叠加权重不是求解本身,设完直接取远场即可,**不需要重新 analyze**。"
+            "双馈 CP / 差分 / 相控阵该怎么设,见 SKILL.md §7。"),
         "parameters": {
             "type": "object",
             "properties": {

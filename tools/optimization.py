@@ -194,14 +194,10 @@ def _enable_sensitivity(oDesign, names):
     "type": "function",
     "function": {
         "name": "create_sensitivity",
-        "description": (
-            "建灵敏度分析:在当前工作点附近算**每个变量对指标的偏导**,回答\"该动哪个变量\"。"
-            "典型用途:扫参之前先问一次 —— 三五个候选变量里哪个对频率最灵、哪个基本不影响,"
-            "然后只扫真正有用的那个,省掉大半机时。"
-            "与参扫的分工:参扫是**笛卡尔积铺开看全貌**,灵敏度是**工作点附近取少量点求梯度**,便宜得多。"
-            "给的是当前这个结构的实测偏导,所以一个尺寸同时影响多个指标时,耦合关系直接看得见。"
-            "建完用 run_sensitivity 跑。**要求该 setup 已有解**(梯度在工作点附近算)。"
-        ),
+        "description": ("建灵敏度分析:在当前工作点附近算**每个变量对指标的偏导**,回答\"该动哪个变量\"。"
+            "与参扫的分工:参扫是笛卡尔积铺开看全貌,灵敏度是工作点附近取少量点求梯度,便宜得多。"
+            "**要求该 setup 已有解**(梯度在工作点附近算)。建完用 run_sensitivity 跑。"
+            "什么时候该先做这一步,见 SKILL.md §8.0。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -334,14 +330,10 @@ def run_sensitivity(ctx, name):
     "type": "function",
     "function": {
         "name": "get_sensitivity_result",
-        "description": (
-            "取灵敏度分析结果:每个变量对指标的**一阶/二阶偏导**,并按影响力排好序。"
-            "`dominant` 给出最灵的那个变量,`relative` 是各变量相对它的权重(0~1)—— "
-            "**决定扫参该动谁就看这个**:权重远小于 1 的变量扫了也是白扫。"
-            "二阶导大说明响应非线性强,线性外推估步长会不准,该缩小扫描范围。"
-            "⚠️ 一阶导的单位是「指标单位 / 变量的 SI 单位(米)」,绝对值不直观;"
-            "**用 relative 比值判断,别直接读绝对值**。"
-        ),
+        "description": ("取灵敏度结果:每个变量对指标的一阶/二阶偏导,按影响力排序。"
+            "`dominant` 是最灵的变量,`relative` 是各变量相对它的权重(0~1),"
+            "`nonlinearity` = |二阶导/一阶导|。⚠️ 一阶导带 SI 单位(每米),绝对值不直观,"
+            "**判断用 relative 比值**。怎么据此定扫参策略,见 SKILL.md §8.0。"),
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string", "description": "灵敏度 setup 名"},
             "csv_path": {"type": "string", "description": "可选:导出 CSV 的落地路径,不传放 exports/"},

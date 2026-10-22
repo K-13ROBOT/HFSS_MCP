@@ -229,14 +229,10 @@ def create_coax_feed_port(ctx, name, gnd, feed_x, feed_y, z_bottom, z_top,
     "type": "function",
     "function": {
         "name": "create_wave_port",
-        "description": (
-            "在已建好的 sheet 上建波导端口(Wave Port,Driven Modal)。用于矩形/圆波导、SIW、"
-            "需要看高次模或要 de-embed 的馈线端面。"
-            "**端口 sheet 必须贴在模型外边界上**(封在求解域内部的面要用 create_lumped_port,"
-            "浮在内部的 wave port 求解会报错或给出无意义阻抗);**端口 sheet 不要赋 PE**。"
-            "积分线可选:单模且只看 S 参数可不给(num_modes=1 时 HFSS 自动定模);"
-            "要确定阻抗归一化方向或做多模分解时给 int_start→int_end(从参考导体指向激励侧)。"
-        ),
+        "description": ("在已建好的 sheet 上建波导端口(Wave Port,Driven Modal):矩形/圆波导、SIW、要看高次模或 de-embed 的馈线端面。"
+            "**端口 sheet 必须贴在模型外边界上** —— 封在求解域内部的面要改用 create_lumped_port,"
+            "浮在内部的 wave port 求解会报错或给出无意义阻抗;**端口 sheet 不要赋 PE**。"
+            "积分线可选:单模只看 S 参数可不给;要定阻抗归一化方向或做多模分解才给 int_start→int_end。"),
         "parameters": {
             "type": "object",
             "properties": {

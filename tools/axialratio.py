@@ -49,15 +49,11 @@ def _ghz(v):
     "type": "function",
     "function": {
         "name": "get_axial_ratio",
-        "description": (
-            "取单个已求解设计的**轴比 AR(dB) vs 频率**曲线 + 3dB 轴比带宽 —— CP 天线的对标门。"
-            "默认取 boresight(theta=0,phi=0)。"
-            "与 get_parametric_axial_ratio 区别:那个是参扫各组合在单频点的最小 AR;这个是一个设计整条扫频的 AR 曲线,"
-            "能直接给出 AR<=3dB 的连续带宽,判定是否覆盖工作频段。"
-            "**前提:扫频必须用 create_sweep(..., sweep_type='Discrete', save_fields=True) 建**"
-            "——实测 2025.2 上只设 save_rad_fields 不生效(远场报告报 com_error)。"
-            "另需 create_open_region + create_infinite_sphere。"
-        ),
+        "description": ("取单个已求解设计的**轴比 AR(dB) vs 频率**曲线 + 3dB 轴比带宽,默认 boresight(θ=0,φ=0)。"
+            "与 get_parametric_axial_ratio 的区别:那个是参扫各组合在**单频点**的最小 AR;"
+            "这个是一个设计**整条扫频**的 AR 曲线,能直接给出 AR≤3dB 的连续带宽。"
+            "**前提:扫频必须 create_sweep(sweep_type='Discrete', save_fields=True) 建**"
+            "(只设 save_rad_fields 不生效,远场报告会报 com_error);另需 open_region + infinite_sphere。"),
         "parameters": {
             "type": "object",
             "properties": {

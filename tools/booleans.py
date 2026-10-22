@@ -128,14 +128,11 @@ def _translate(oEditor, names, axis_idx, expr):
     "type": "function",
     "function": {
         "name": "split",
-        "description": (
-            "按坐标平面切割对象(实体或 sheet 都行),保留一侧或两侧。"
-            "plane=XY 表示平面 z=offset(法向 +Z),YZ → x=offset(法向 +X),ZX → y=offset(法向 +Y)。"
-            "keep='positive' 保留法向正侧,'negative' 保留负侧,'both' 两侧都留(新增部件名见返回)。"
-            "典型用法:把螺旋带/斜切带子的端头切成水平——顶端 split(plane='XY', offset='z_top', keep='negative'),"
-            "底端 split(plane='XY', offset='z_bot', keep='positive')。offset 可用变量表达式。"
-            "注意:sheet 不能被 solid 用 subtract 切(类型不匹配会失败并删掉 blank),要切 sheet 就用本工具。"
-        ),
+        "description": ("按坐标平面切割对象(实体或 sheet 都行),保留一侧或两侧。"
+            "plane=XY 表示平面 z=offset(法向 +Z),YZ → x=offset,ZX → y=offset;"
+            "keep='positive' 留法向正侧,'negative' 留负侧,'both' 两侧都留(新增部件名见返回)。"
+            "offset 可用变量表达式。**切 sheet 只能用本工具** —— solid 去 subtract 一张 sheet "
+            "会类型不匹配而失败,并把 blank 一起删掉。"),
         "parameters": {
             "type": "object",
             "properties": {

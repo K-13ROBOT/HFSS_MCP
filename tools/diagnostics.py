@@ -73,13 +73,9 @@ def _summarize(msgs):
     "type": "function",
     "function": {
         "name": "get_messages",
-        "description": (
-            "读 HFSS **消息窗口**(Message Manager)——求解完但结果不对时的第一手线索。"
-            "COM 异常只反映「调用失败」,而端口缺积分线、材料未定义、边界重叠、自适应不收敛、"
-            "端口阻抗偏离归一化值这类抱怨**只出现在消息窗口里**。"
-            "analyze 之后、validate_design 之后、或任何「跑通了但数不对」的时候调。"
-            "返回按 error/warning/info 分桶 + 最近 limit 条原文。"
-        ),
+        "description": ("读 HFSS **消息窗口**(Message Manager)。COM 异常只反映「调用失败」,而端口缺积分线、"
+            "材料未定义、边界重叠、自适应不收敛、解被作废这类抱怨**只出现在消息窗口里**。"
+            "返回按 error/warning/info 分桶 + 最近 limit 条原文。什么时候必读,见 SKILL.md §6 第 10 步。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -125,16 +121,9 @@ def get_messages(ctx, project=None, design=None, severity=0, limit=50, errors_on
     "type": "function",
     "function": {
         "name": "validate_design",
-        "description": (
-            "跑 HFSS 自带的 **Validation Check**(菜单 HFSS > Validation Check 那一个),"
-            "**analyze 之前必调**:30 秒查出端口没积分线/setup 没绑激励/边界重叠/材料缺失,"
-            "省得求解 10 分钟后才发现白跑。"
-            "与 get_object_bbox 的分工:bbox 查几何层叠搭接(我们自己的几何自检),"
-            "本工具查 HFSS 自己认不认这个 design(边界/激励/求解设置的完整性)。"
-            "判定 = HFSS 返回码 + 消息窗口差集的合取(两版返回码类型不同但语义一致,已统一)。"
-            "注意:**老版本(2019.2 实测)消息窗口写入滞后可达几十秒**,所以 passed=false 但 errors 为空是正常的,"
-            "过一会儿调 get_messages 才看得到错在哪。"
-        ),
+        "description": ("跑 HFSS 自带的 Validation Check:端口没积分线 / setup 没绑激励 / 边界重叠 / 材料缺失。"
+            "与 get_object_bbox 的分工:bbox 查几何层叠搭接(我们自己的自检),"
+            "本工具查 **HFSS 认不认**这个 design。analyze 之前必调,见 SKILL.md §6 第 8 步。"),
         "parameters": {"type": "object", "properties": {}},
     },
 })
