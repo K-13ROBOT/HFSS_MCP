@@ -157,16 +157,13 @@ description: >-
 - **事后改/赋材料**:`assign_material`(给已建**实体**换材料;sheet 导体面用 assign_perfect_e)
 - **网格细化提精度**:`assign_mesh_length`(关键区域限最大边长)、`assign_mesh_surface`(圆柱/螺旋/球等**曲面**的初始多边形逼近细化)。⚠️ **slider 的全局默认是 5、数字越大越细**——传 level=2 是在**变粗**,不是细化;**推荐直接传 `normal_dev`**(如 `'5deg'`,法向偏差,半径 R 的弦高≈R(1−cos(dev/2))),含义明确不易弄反。默认自适应网格够用,**窄缝/高 Q 模/收敛慢/结果可疑时**才手动加
 
-## 5.7 螺旋结构(create_helix / split)
-四臂螺旋、单臂螺旋、螺旋带这类**沿圆柱面卷绕**的结构,一律用 `create_helix`,**不要用 polyline 平面片拼**
-(拼出来是圆柱的弦,相邻部件边对不上会悬空,且无法参数化——见 `knowledge/quadrifilar-helix.md`)。
-- 轮廓:在圆柱面上(如 x=r·cosφ₀, y=r·sinφ₀)画一条**竖直短线**(`create_polyline`,close/cover 都 False),
-  长度 = 带子沿 z 的宽度 = 垂直带宽 / 周向方向余弦。
-- `create_helix(profile, pitch, turns, right_hand)`:轴默认 +Z 过原点;pitch = 每圈轴向前进;轮廓原地变成螺旋面,名字不变。
-  **pitch/turns/轮廓坐标都能写成设计变量表达式** → 整体缩放系数 `k` 等可以直接参扫。
-- 同一螺旋上 z 偏移的多条带(主臂/缝/寄生臂)各扫一次:它们的边是**完全重合的螺旋线**,`unite` 成一张片即可,天然连通。
-- 端头要水平:`split(objects, plane='XY', offset=z, keep='positive'|'negative')`,offset 可用表达式。
-  sheet 不能被 solid `subtract`,切 sheet 只能用 `split`。
+## 5.7 螺旋结构(create_helix)
+**沿圆柱面卷绕的结构一律用 `create_helix` 扫出来,不要用 polyline 平面片拼** —— 拼出来的是圆柱的弦,
+相邻部件边对不上会悬空,而且整体没法参数化。四臂螺旋、单臂螺旋、轴模螺旋、螺旋加载臂都适用。
+(具体参数和轮廓怎么画见工具描述;四臂螺旋的方向余弦换算、端头切平、分数匝反解见
+`knowledge/quadrifilar-helix.md`。)
+- 同一螺旋上 z 偏移的多条带(主臂/缝/寄生臂)各扫一次:它们的边是**完全重合的螺旋线**,
+  `unite` 成一张片即可,天然连通。
 - 旋向自检:扫完看 bbox 的 y 范围与预期(右旋时顶端落在 φ 增大方向)对比,不对就换 `right_hand`。
 
 ## 6. S 参数仿真完整流程(顺序敏感)
