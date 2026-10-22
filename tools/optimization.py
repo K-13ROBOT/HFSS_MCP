@@ -405,3 +405,271 @@ def get_sensitivity_result(ctx, name, csv_path=None):
             out["verdict"] = (f"'{items[0]['variable']}' 和 '{items[1]['variable']}' 量级相当,"
                               "单独扫任一个都会被另一个带偏,需要二维扫或先固定其一。")
     return out
+
+
+# ─────────────────────────────────────────────────────────
+# 统计分析(蒙特卡洛)—— Optimetrics OptiStatistical
+# 回答"按这个公差投产,良率是多少":给变量加分布,HFSS 随机采样跑 N 次,
+# 统计指标的分布。公差/良率不用自己造轮子,HFSS 本来就有。
+# 参数结构照 Tools→Record Script 录出来的官方调用(2025.2)。
+# ⚠️ 三个不同于灵敏度的地方:
+#   ① 变量启用属性组是 "Statistical" —— 这是第三个组(另两个是 Optimization / Sensitivity),
+#      每种分析各用各的,用错了变量不出现在表里且没有任何报错。
+#   ② MaxIterations 就是试验次数(GUI 对话框里压根没这个字段,默认 50)。
+#   ③ 高斯分布的 Min/Max 是 **σ 单位的截断**(默认 ±3σ),不是变量的量纲;
+#      变量本身的边界另有 VarMin/VarMax。LatinHypercube 是**字符串** "true"。
+# ─────────────────────────────────────────────────────────
+
+_DISTS = ("Gaussian", "Uniform", "Lognormal")
+
+
+def _enable_statistical(oDesign, names):
+    """把变量标成"参与统计分析"。属性组名是 Statistical。"""
+    changed = [["NAME:" + n, ["NAME:Statistical", "Included:=", True]] for n in names]
+    oDesign.ChangeProperty(
+        ["NAME:AllTabs",
+         ["NAME:LocalVariableTab",
+          ["NAME:PropServers", "LocalVariables"],
+          ["NAME:ChangedProps"] + changed]])
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "create_statistical",
+        "description": (
+            "建统计分析(蒙特卡洛):给变量加**公差分布**,随机采样跑 N 次,看指标的分布和良率。"
+            "回答的是\"按这个加工公差投产,有多少比例的板子能达标\" —— 仿真漂亮但批量下来一半不合格,"
+            "就是没做过这一步。与灵敏度的分工:灵敏度问\"动哪个变量\",统计分析问\"变量抖动时指标散多少\"。"
+            "**代价是 trials 次完整求解**,调用前务必预告耗时。建完用 run_statistical 跑。"
+            "什么时候该做、结果怎么用,见 SKILL.md §8.5。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "统计 setup 名,如 'Stat1'"},
+                "variables": {
+                    "type": "array", "minItems": 1,
+                    "items": {"type": "object", "properties": {
+                        "name": {"type": "string"},
+                        "distribution": {"type": "string", "enum": ["Gaussian", "Uniform", "Lognormal"],
+                                         "default": "Gaussian",
+                                         "description": "加工公差一般用 Gaussian;最坏情况估计用 Uniform"},
+                        "std_dev": {"type": "string",
+                                    "description": "Gaussian 的标准差,带单位(如 '0.1mm')。"
+                                                   "**板厂给的 ±公差通常是 3σ**,所以 ±0.3mm 的公差对应 std_dev='0.1mm'"},
+                        "tolerance": {"type": "string",
+                                      "description": "Uniform 用的容差,百分比(如 '1%')或带单位"},
+                        "sigma_clip": {"type": "number", "default": 3,
+                                       "description": "Gaussian 截断在几倍 σ,默认 3"},
+                    }, "required": ["name"]},
+                    "description": "加公差的变量。Gaussian 给 std_dev,Uniform 给 tolerance",
+                },
+                "calculation": {"type": "string", "description": "考察哪个指标,如 'dB(S(P1,P1))'"},
+                "freq": {"type": "string", "description": "在哪个频点算,不传用 setup 的自适应频率"},
+                "setup": {"type": "string", "description": "求解 setup 名,不传用第一个"},
+                "sweep": {"type": "string", "default": "LastAdaptive"},
+                "trials": {"type": "integer", "default": 50,
+                           "description": "跑几次(= MaxIterations)。**每次都是一次完整求解**,"
+                                          "先用 10~20 看趋势,要可信的良率数字才上 50+"},
+                "latin_hypercube": {"type": "boolean", "default": True,
+                                    "description": "拉丁超立方采样,少量试验下覆盖比纯随机均匀得多,建议开"},
+                "seed": {"type": "integer", "default": 0, "description": "随机种子,0 = 每次不同"},
+            },
+            "required": ["name", "variables", "calculation"],
+        },
+    },
+})
+def create_statistical(ctx, name, variables, calculation, freq=None, setup=None,
+                       sweep="LastAdaptive", trials=50, latin_hypercube=True, seed=0):
+    oDesign = ctx["oDesign"]
+    state = ctx.get("state")
+    setups = list(state.setups.keys()) if state else []
+    if setup is None:
+        if not setups:
+            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup)"}
+        setup = setups[0]
+    freq = freq or (state.setups.get(setup, {}).get("frequency") if state else None)
+    if not freq:
+        return {"ok": False, "error": "缺 freq 且无法从 setup 推断", "hint": "传 freq='2.4GHz'"}
+
+    names = [v["name"] for v in variables]
+    try:
+        _enable_statistical(oDesign, names)
+    except Exception as e:
+        return {"ok": False, "error": f"启用变量的 Statistical 属性失败: {type(e).__name__}: {e}",
+                "hint": "变量名是否拼错?必须是已 set_variable 建过的设计变量"}
+
+    start, var_block = ["NAME:StartingPoint"], ["NAME:Variables"]
+    for v in variables:
+        n = v["name"]
+        dist = v.get("distribution", "Gaussian")
+        if dist not in _DISTS:
+            return {"ok": False, "error": f"不支持的分布 '{dist}'", "hint": f"可选: {_DISTS}"}
+        try:
+            cur = str(oDesign.GetVariableValue(n))
+        except Exception as e:
+            return {"ok": False, "error": f"取变量 '{n}' 当前值失败: {type(e).__name__}: {e}"}
+        num, unit = _split_val(cur)
+        if dist == "Gaussian" and not v.get("std_dev"):
+            return {"ok": False, "error": f"变量 '{n}' 用 Gaussian 必须给 std_dev",
+                    "hint": "板厂的 ±公差通常是 3σ,±0.3mm 对应 std_dev='0.1mm'"}
+        if dist == "Uniform" and not v.get("tolerance"):
+            return {"ok": False, "error": f"变量 '{n}' 用 Uniform 必须给 tolerance",
+                    "hint": "如 '1%' 或 '0.3mm'"}
+        clip = float(v.get("sigma_clip", 3))
+        vmin = f"{num * 0.5:g}{unit}" if num is not None else cur
+        vmax = f"{num * 1.5:g}{unit}" if num is not None else cur
+        start += [f"{n}:=", cur]
+        var_block += [f"{n}:=", [
+            "i:=", True, "int:=", False,
+            "Dist:=", dist,
+            "Tol:=", str(v.get("tolerance", "10%")),
+            "StdD:=", str(v.get("std_dev", "0")),
+            # 高斯的 Min/Max 是 σ 倍数,不是变量量纲
+            "Min:=", f"{-clip:g}", "Max:=", f"{clip:g}",
+            "Shape:=", "1", "Scale:=", f"{num * 0.1:g}{unit}" if num is not None else "0",
+            "Location:=", cur, "Dataset:=", "",
+            "LatinHypercube:=", "true" if latin_hypercube else "false",
+            "VarMin:=", vmin, "VarMax:=", vmax,
+            "Prob:=", "0", "Mean:=", cur]]
+
+    goal = ["NAME:Goal",
+            "ReportType:=", "Modal Solution Data",
+            "Solution:=", f"{setup} : {sweep}",
+            ["NAME:SimValueContext"],
+            "Calculation:=", calculation, "Name:=", calculation,
+            ["NAME:Ranges",
+             "Range:=", ["Var:=", "Freq", "Type:=", "d", "DiscreteValues:=", str(freq)]]]
+
+    arg = ["NAME:" + name, "IsEnabled:=", True,
+           ["NAME:ProdOptiSetupDataV2", "SaveFields:=", False, "CopyMesh:=", False,
+            "SolveWithCopiedMeshOnly:=", True],
+           start,
+           "MaxIterations:=", int(trials),
+           "SeedValue:=", int(seed),
+           "PriorPSetup:=", "",
+           var_block,
+           ["NAME:Goals", goal]]
+    try:
+        _opti(ctx).InsertSetup("OptiStatistical", arg)
+    except Exception as e:
+        return {"ok": False, "error": f"InsertSetup(OptiStatistical) 失败: {type(e).__name__}: {e}",
+                "hint": "同名 setup 已存在?变量是表达式型?"}
+
+    if state is not None:
+        if not hasattr(state, "statisticals"):
+            state.statisticals = {}
+        state.statisticals[name] = {"variables": names, "calculation": calculation,
+                                    "setup": setup, "freq": freq, "trials": int(trials)}
+    return {"ok": True, "name": name, "setup": setup, "variables": names,
+            "calculation": calculation, "freq": freq, "trials": int(trials),
+            "latin_hypercube": bool(latin_hypercube),
+            "warn_cost": f"跑这个要 {int(trials)} 次完整求解 —— 先跟用户确认耗时再 run_statistical。"}
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "run_statistical",
+        "description": ("跑统计分析(阻塞,**trials 次完整求解**)。时间 = trials × 单点求解时间,"
+                        "动辄几十分钟到几小时,调用前必须预告耗时并等用户确认。"
+                        "跑完用 get_statistical_result 取分布与良率。"),
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "统计 setup 名"}}, "required": ["name"]},
+    },
+})
+def run_statistical(ctx, name):
+    print(f"  [Statistical] {name} ...")
+    t0 = time.time()
+    try:
+        _opti(ctx).SolveSetup(name)
+    except Exception as e:
+        return {"ok": False, "error": f"统计分析求解失败: {type(e).__name__}: {e}",
+                "elapsed_sec": round(time.time() - t0, 1)}
+    return {"ok": True, "name": name, "elapsed_sec": round(time.time() - t0, 1),
+            "hint": "用 get_statistical_result 取分布与良率"}
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "get_statistical_result",
+        "description": (
+            "取统计分析结果:指标在公差抖动下的**分布**(均值/标准差/最值/分位数),"
+            "给了 spec 还会算**良率**(满足规格的试验占比)。"
+            "良率低说明设计对公差敏感 —— 配合灵敏度分析能定位是哪个变量在拖后腿,"
+            "进而决定该找板厂把哪一项卡紧。结果怎么用见 SKILL.md §8.5。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "统计 setup 名"},
+            "spec_op": {"type": "string", "enum": ["<=", ">=", "<", ">"], "default": "<=",
+                        "description": "规格方向。S11/VSWR/AR 用 <=,增益/带宽用 >="},
+            "spec_value": {"type": "number", "description": "规格门限,如 -10(dB)。不传则只给分布不算良率"},
+            "csv_path": {"type": "string", "description": "可选:导出 CSV 落地路径"},
+        }, "required": ["name"]},
+    },
+})
+def get_statistical_result(ctx, name, spec_op="<=", spec_value=None, csv_path=None):
+    import os
+    oDesign = ctx["oDesign"]
+    from .session import EXPORTS_DIR
+    csv_path = csv_path or os.path.join(EXPORTS_DIR, f"_stat_{name}.csv")
+    if os.path.exists(csv_path):
+        os.remove(csv_path)
+    try:
+        oDesign.GetModule("Optimetrics").ExportOptimetricsResult(name, csv_path)
+    except Exception as e:
+        return {"ok": False, "error": f"ExportOptimetricsResult 失败: {type(e).__name__}: {e}",
+                "hint": "这个统计 setup 跑过了吗(先 run_statistical)?"}
+    if not os.path.exists(csv_path) or os.path.getsize(csv_path) < 20:
+        return {"ok": False, "error": "导出没产出内容,多半是还没有结果", "hint": "先 run_statistical"}
+
+    rows = [ln.strip() for ln in open(csv_path, encoding="utf-8", errors="replace") if ln.strip()]
+    if len(rows) < 2:
+        return {"ok": False, "error": "结果为空", "csv": csv_path}
+    # 同灵敏度:指标表达式自己带逗号,不能简单按逗号切。数值列在最右端。
+    header = rows[0]
+    vals = []
+    for ln in rows[1:]:
+        parts = [p.strip() for p in ln.split(",")]
+        got = None
+        for p in reversed(parts):          # 从右往左找第一个能转成浮点的
+            try:
+                got = float(p); break
+            except ValueError:
+                continue
+        if got is not None:
+            vals.append(got)
+    if not vals:
+        return {"ok": False, "error": "解析不出数值", "csv": csv_path, "header": header[:160]}
+
+    n = len(vals)
+    mean = sum(vals) / n
+    var = sum((x - mean) ** 2 for x in vals) / n
+    sd = var ** 0.5
+    sv = sorted(vals)
+
+    def pct(q):
+        i = max(0, min(n - 1, int(round(q * (n - 1)))))
+        return round(sv[i], 4)
+
+    out = {"ok": True, "name": name, "n_trials": n,
+           "mean": round(mean, 4), "std_dev": round(sd, 4),
+           "min": round(sv[0], 4), "max": round(sv[-1], 4),
+           "p05": pct(0.05), "median": pct(0.5), "p95": pct(0.95),
+           "spread": round(sv[-1] - sv[0], 4), "csv": csv_path}
+    if spec_value is not None:
+        ops = {"<=": lambda x: x <= spec_value, ">=": lambda x: x >= spec_value,
+               "<": lambda x: x < spec_value, ">": lambda x: x > spec_value}
+        passed = sum(1 for x in vals if ops[spec_op](x))
+        out["spec"] = f"{spec_op} {spec_value}"
+        out["pass_count"] = passed
+        out["yield_pct"] = round(passed / n * 100, 1)
+        if n < 20:
+            out["note_n"] = (f"只有 {n} 次试验,良率数字的置信区间很宽(±{100/n**0.5:.0f}% 量级),"
+                             "只能看趋势。要可信的良率跑 50+ 次。")
+        if out["yield_pct"] < 90:
+            out["verdict"] = ("良率偏低,设计对公差敏感。配合 get_sensitivity_result 看是哪个变量主导,"
+                              "再决定收紧公差还是改设计让它对该变量不敏感。")
+    return out
