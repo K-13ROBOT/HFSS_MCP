@@ -278,3 +278,14 @@ C4 结构的 S 矩阵是循环阵,按顺序相位馈电时**四个口的 ActiveS
 - 解法:**为每个要考察的谐振点新建一个 setup**(频率设在该谐振上)再 analyze,用它的 LastAdaptive 取远场。
   顺手在该 setup 上挂一条 `Discrete + save_fields` 的扫频,一次求解同时拿到方向图和轴比曲线,省一轮。
 - 引申:realized gain 天生含失配。要看天线本身的方向性,别在失配频点上比较增益。
+
+## 本征模 setup 不要发 `MeshLink` 块(老版本会直接拒绝)
+- 现象:`InsertSetup("HfssEigen", ...)` 在 2019.2 上报 com_error,消息窗口写
+  `The partner project name cannot be empty. Please finish the setup at the Setup Link dialog`。
+  同一段参数在 2025.2 上完全正常。
+- 原因:参数块里带了 `["NAME:MeshLink", "ImportMesh:=", False]`。2025.2 允许它存在且
+  `ImportMesh:=False` 时无作用;**2019.2 只要这个块出现就要求给 partner project 名**。
+- 解法:**不发这个块**。它只在跨工程链接网格时才需要,两个版本都正常。
+- 通用教训:**从新版本录制出来的脚本,参数块可能比老版本能接受的更宽**。录制是摸参数结构
+  最快的路,但录完要在老版本上回归一次 —— 多出来的块不一定被静默忽略,也可能直接报错。
+

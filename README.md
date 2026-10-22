@@ -82,6 +82,8 @@ MCP 工具是"手",skill 是"怎么正确用手"的纪律 —— 复现文献总
 - **建模/求解/参扫的核心工具**在 2019.2 实测(含最难的参扫结果提取);辅助设计 3 个工具(`search_designs`/`list_design_cards`/`check_design_targets`)为纯本地逻辑、单测通过。
 - **诊断工具**(`validate_design` / `get_messages`)在 2019.2 + 2025.2 双版本实测:坏 design(无激励 / 材料没设 solve inside)判 `passed=false`,好 design 判 `passed=true`;两版的返回码类型与消息延迟差异已在代码里兜住(见[已知的版本差异](#已知的版本差异))。
 - **周期单元工具**(主从边界 + Floquet 端口)按 AEDT 脚本 API 实现、参数构造离线核对通过,但**COM 行为尚未逐版本真机回归**——首次用请盯结果。
+- **最近新增的工具在 2019.2 + 2025.2 双版本回归通过**(15/15):场诊断(沿路径取表面电流)、灵敏度三件套、统计/公差三件套、本征模求解,以及 `thicken` / `create_circle` / `split` / `create_wave_port` / `delete_sweep` / `cleanup_solutions`。
+  **本征模与解析解对过**:50×25×40mm 真空腔前三个模,2019.2 偏差 0.004~0.019%、2025.2 偏差 0.005~0.021%。
 - **整条管线产出过一个正确匹配的天线**(探针贴片:S11 −11.7dB / VSWR 1.7 / Zin~50Ω,自洽)——"建+求解"这半边已坐实。
 
 ## 前置要求
@@ -223,6 +225,7 @@ skill/hfss-stackup/               PCB 叠层还原 skill
 | 消息窗口写入 | **滞后可达几十秒** | 即时 | 判定以返回码为主,消息只说明"错在哪" |
 | `GetMessages` 的 severity 参数 | — | **0/1/2 结果相同,不起作用** | 级别自己从 `[error]`/`[warning]` 标记解析 |
 | 扫频存远场 | — | **单设 `SaveRadFields` 不生效** | 取 AR/增益 vs 频率要 `Discrete` + `save_fields=True` |
+| 本征模 setup 的 `MeshLink` 块 | **出现就要求 partner project 名**,否则报"The partner project name cannot be empty" | 可带可不带(`ImportMesh:=False` 时无作用)| 一律不发这个块 |
 
 另有两条与版本无关、但同样反直觉:
 

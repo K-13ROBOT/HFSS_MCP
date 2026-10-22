@@ -846,7 +846,9 @@ def create_eigenmode_setup(ctx, name, min_frequency, num_modes=1, max_passes=6,
              "MinimumConvergedPasses:=", 1,
              "PercentRefinement:=", 30,
              "IsEnabled:=", True,
-             ["NAME:MeshLink", "ImportMesh:=", False],
+             # 不带 MeshLink 块:2025.2 录制里有(ImportMesh:=False 等于没用),但 **2019.2 上
+             # 只要出现这个块就要求 partner project 名**,否则报
+             # "The partner project name cannot be empty"。我们从不跨工程链接网格,直接不发。
              "BasisOrder:=", 1,
              "DoLambdaRefine:=", True,
              "DoMaterialLambda:=", True,
