@@ -657,7 +657,7 @@ def delete_parametric(ctx, names=None, confirm=False):
         for n in deleted:
             state.parametrics.pop(n, None)
 
-    out = {"ok": not failed, "deleted": deleted, "remaining": _existing() or []}
+    out = {"ok": not failed, "deleted": deleted, "remaining": _parametrics_of(ctx) or []}
     if failed:
         out["failed"] = failed
         out["error"] = f"部分参扫删除失败: {list(failed)}"
