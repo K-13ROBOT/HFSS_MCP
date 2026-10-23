@@ -248,6 +248,8 @@ C4 结构的 S 矩阵是循环阵,按顺序相位馈电时**四个口的 ActiveS
 - 补充(实测):同一 design 里反复出现(11:25、14:42 两次),资源充足(RAM 9GB 空闲、磁盘几十 GB)。
   第二次 analyze 仍返回 ok、151 点数据完整,但耗时从 ~500s 拖到 ~2600s——**报错不一定让结果失效,
   先看数据是否完整平滑,再决定要不要重跑**。
+- 补充(2026-10-22 实测,小模型 7 万四面体):**每次启动失败都要先等约 30 分钟超时**。多频点自适应会"Solving Distributed - up to 2 frequencies in parallel",卡在某一轮拉子进程上;profile 里 Adaptive Meshing 总耗时 31 min,而各轮实际求解加起来不到 1 min。一次超时后直接失败,另一次超时后重试成功、结果正常。**判据**:求解比预期慢很多倍时,看 profile 里各轮 Elapsed 之和与 Adaptive Meshing 总时长差多少,差出来的就是卡在启动上。
+- ★ **根治(2026-10-22 实测有效)**:卡点在 HPC 配置的 `UseAutoSettings=true` —— 自动模式会把多频点自适应/插值扫频拆给多个求解进程并行,这一步要走 MPI,本机 MPI 起不来就卡 30 分钟。改成**手动、1 个任务(NumEngines=1)、核数不变**,求解不再走 MPI:同一模型从 34–40 min 降到 **3 min**,零报错。配置在 `Documents/Ansoft/ElectronicsDesktop<ver>/config/<host>_user.XML` 的 `DSOConfigurationsEx/HFSS/<当前配置名>` 里(当前配置名看 `ActiveDSOConfigurations`)。**必须先关掉 AEDT 再改**——它退出时会回写这个文件;改前先备份。这是改用户本机的全局设置,先征得同意。
 - 排查:先看内存与磁盘余量;工程里开了很多 design、跑过大量求解时资源压力大。偶发的可直接重跑一次;
   反复出现就存盘后重启 AEDT(`open_desktop` 重开),或减少扫频点数/改 Discrete 少点扫频降低进程启动次数。
 

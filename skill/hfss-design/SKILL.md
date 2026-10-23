@@ -333,7 +333,9 @@ S 参数流程外加:
   改的是后处理叠加权重不是求解本身,所以**设完直接取远场,不需要重新 analyze**(零成本)。
 - 单个已求解设计(非参扫)直接取 **轴比 vs 频率 + 3dB AR 带宽** → `get_axial_ratio`(默认 boresight θ=0/φ=0)。CP 天线 analyze 完先用它,不必为看一个 AR 去建参扫。
   **前提**:扫频必须建成 `create_sweep(..., sweep_type='Discrete', save_fields=True)`——实测 2025.2 上只设 `save_rad_fields` 不生效(远场报告报 com_error)。要取 AR 就在建 sweep 时一并设好,别等 analyze 完再发现白跑
-- 要**整条方向图曲线**(单个已求解设计,增益 vs 角度)→ `get_radiation_pattern`:默认导 E面(φ=0)/H面(φ=90)两刀,返回 theta/gain 数组 + 峰值(CSV 自动落在 exports/,无需传路径);CP 天线传 `polarization='lhcp'/'rhcp'`
+- 要**整条方向图曲线**(单个已求解设计,增益 vs 角度)→ `get_radiation_pattern`:默认导 E面(φ=0)/H面(φ=90)两刀,返回 theta/gain 数组 + 峰值(CSV 自动落在 exports/,无需传路径);CP 天线传 `polarization='lhcp'/'rhcp'`。
+  对多频点的存场扫频(`Discrete + save_fields=True`)一次取全部频点:每刀给 `by_freq`,另有 `boresight_gain_dB` 汇总轴向增益 vs 频率;
+  只要一个频点就传 `freq='38.5GHz'`。⚠️ theta 只扫 0–180°,所以 φ=0 那刀只覆盖 +x 半边,另一半在 φ=180,要完整切面就把 180deg 也加进 `phi_cuts`
 
 ## 8. 参数扫描
 

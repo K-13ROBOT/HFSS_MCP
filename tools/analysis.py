@@ -6,6 +6,7 @@ get_s_parameters → ReportSetup.CreateReport + ExportToFile CSV 再解析。
 """
 
 import os
+import re
 
 from . import tool
 
@@ -628,11 +629,15 @@ _POL = {"total": "Total", "lhcp": "LHCP", "rhcp": "RHCP", "theta": "Theta", "phi
     "function": {
         "name": "get_radiation_pattern",
         "description": ("导出远场方向图:增益(dB) vs theta,按 phi 切面(默认 E面0°/H面90°)。"
-                        "返回每刀 theta/gain 数组+峰值。调用前必须已 analyze,且 design 有 create_open_region + create_infinite_sphere。"),
+                        "返回每刀 theta/gain 数组+峰值。调用前必须已 analyze,且 design 有 create_open_region + create_infinite_sphere。"
+                        "对多频点的存场扫频:不传 freq 则每刀按频点给 by_freq(每个频点一组 gain/峰值),"
+                        "另附 boresight_gain_dB 汇总轴向增益 vs 频率;传 freq 只取该频点。"),
         "parameters": {
             "type": "object",
             "properties": {
                 "setup": {"type": "string"}, "sweep": {"type": "string", "default": "LastAdaptive"},
+                "freq": {"type": "string",
+                         "description": "可选:只取这个频点,如 '38.5GHz'(须是该扫频里有的点);不传=全部频点"},
                 "sphere": {"type": "string", "default": "Sphere1"},
                 "phi_cuts": {"type": "array", "items": {"type": "string"},
                              "description": "phi 切面列表带 deg,默认 ['0deg','90deg']"},
@@ -643,7 +648,7 @@ _POL = {"total": "Total", "lhcp": "LHCP", "rhcp": "RHCP", "theta": "Theta", "phi
     },
 })
 def get_radiation_pattern(ctx, setup=None, sweep="LastAdaptive", sphere="Sphere1",
-                          phi_cuts=None, gain_type="realized", polarization="total"):
+                          phi_cuts=None, gain_type="realized", polarization="total", freq=None):
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
     setups = list(state.setups.keys()) if state else []
@@ -663,7 +668,7 @@ def get_radiation_pattern(ctx, setup=None, sweep="LastAdaptive", sphere="Sphere1
     for phi in phi_cuts:
         rname = "ff_tmp"
         csv_path = os.path.join(EXPORTS_DIR, f"_ff_{phi}.csv")
-        fam = ["Theta:=", ["All"], "Phi:=", [str(phi)], "Freq:=", ["All"]]
+        fam = ["Theta:=", ["All"], "Phi:=", [str(phi)], "Freq:=", [str(freq)] if freq else ["All"]]
         trace = ["X Component:=", "Theta", "Y Component:=", [expr]]
         forms = [
             (rname, "Far Fields", "Data Table", soln, ["Context:=", sphere], fam, trace, []),
@@ -691,24 +696,48 @@ def get_radiation_pattern(ctx, setup=None, sweep="LastAdaptive", sphere="Sphere1
                 rows = [ln.rstrip("\n").split(",") for ln in f if ln.strip()]
         except Exception as e:
             return {"ok": False, "error": f"读 CSV 失败: {e}"}
-        thetas, gains = [], []
+        # 多频点扫频导出的是宽表:第 1 列 Theta,之后每个频点一列(表头带 Freq='...')
+        header = rows[0] if rows else []
+        col_freqs = []
+        for h in header[1:]:
+            m = re.search(r"Freq='([^']+)'", h)
+            col_freqs.append(m.group(1) if m else (str(freq) if freq else None))
+        thetas, cols = [], [[] for _ in col_freqs]
         for r in rows[1:]:
-            if len(r) < 2:
+            if len(r) < 1 + len(col_freqs):
                 continue
             try:
-                thetas.append(float(r[0].strip().strip('"').split()[0]))
-                gains.append(float(r[1].strip().strip('"').split()[0]))
+                t = float(r[0].strip().strip('"').split()[0])
+                vals = [float(r[j + 1].strip().strip('"').split()[0]) for j in range(len(col_freqs))]
             except Exception:
                 continue
-        if not thetas:
-            return {"ok": False, "error": f"远场数据空 (phi={phi})", "csv_header": rows[0] if rows else None}
-        pk = max(gains); pi = gains.index(pk)
-        cuts.append({"phi": str(phi), "theta_deg": [round(t, 2) for t in thetas],
-                     "gain_dB": [round(g, 3) for g in gains],
-                     "peak_gain_dB": round(pk, 2), "peak_theta_deg": round(thetas[pi], 2),
-                     "n_points": len(thetas)})
-    return {"ok": True, "setup": setup, "sphere": sphere, "gain_type": gain_type,
-            "polarization": polarization, "metric": expr, "n_cuts": len(cuts), "cuts": cuts}
+            thetas.append(t)
+            for j, v in enumerate(vals):
+                cols[j].append(v)
+        if not thetas or not col_freqs:
+            return {"ok": False, "error": f"远场数据空 (phi={phi})", "csv_header": header or None}
+
+        def _one(gains, f):
+            pk = max(gains); pi = gains.index(pk)
+            return {"freq": f, "gain_dB": [round(g, 3) for g in gains],
+                    "peak_gain_dB": round(pk, 2), "peak_theta_deg": round(thetas[pi], 2)}
+        cut = {"phi": str(phi), "theta_deg": [round(t, 2) for t in thetas], "n_points": len(thetas)}
+        if len(col_freqs) == 1:
+            cut.update(_one(cols[0], col_freqs[0]))
+        else:
+            # 多频点时不放顶层 gain_dB,免得被当成"那一个"频点的结果
+            cut["by_freq"] = [_one(g, f) for g, f in zip(cols, col_freqs)]
+        cuts.append(cut)
+
+    out = {"ok": True, "setup": setup, "sphere": sphere, "gain_type": gain_type,
+           "polarization": polarization, "metric": expr, "n_cuts": len(cuts), "cuts": cuts}
+    # 轴向增益 vs 频率:取第一刀 theta=0(各刀在 theta=0 是同一个方向)
+    c0 = cuts[0]
+    if 0.0 in c0["theta_deg"]:
+        i0 = c0["theta_deg"].index(0.0)
+        per = c0["by_freq"] if "by_freq" in c0 else [c0]
+        out["boresight_gain_dB"] = [{"freq": p["freq"], "gain_dB": p["gain_dB"][i0]} for p in per]
+    return out
 
 
 def _results_dir_size(ctx):
