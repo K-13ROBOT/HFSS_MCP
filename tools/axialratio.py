@@ -78,9 +78,10 @@ def get_axial_ratio(ctx, setup=None, sweep="Sweep1", sphere="Sphere1", theta="0d
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
     setups = list(state.setups.keys()) if state else []
-    if not setups:
-        return {"ok": False, "error": "无 setup"}
-    setup = setup or setups[0]
+    if setup is None:   # 只有没显式给 setup 才需要 state;重开工程后 state.setups 为空,显式给的不该被挡
+        if not setups:
+            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup)"}
+        setup = setups[0]
 
     expr = "dB(AxialRatioValue)"
     soln = "%s : %s" % (setup, sweep)

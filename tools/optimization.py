@@ -59,9 +59,10 @@ def create_optimization(ctx, name, calculation, variables, condition="<=", goal_
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
     setups = list(state.setups.keys()) if state else []
-    if not setups:
-        return {"ok": False, "error": "无 setup"}
-    setup = setup or setups[0]
+    if setup is None:   # 只有没显式给 setup 才需要 state;重开工程后 state.setups 为空,显式给的不该被挡
+        if not setups:
+            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup)"}
+        setup = setups[0]
     freq = freq or (state.setups.get(setup, {}).get("frequency") if state else None)
     if not freq:
         return {"ok": False, "error": "缺 freq 且无法从 setup 推断", "hint": "传 freq='2.4GHz'"}

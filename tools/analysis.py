@@ -11,6 +11,18 @@ import re
 from . import tool
 
 
+def _drop_stale(csv_path):
+    """导出前删掉同名旧 CSV。没有解时 CreateReport/ExportToFile 不报错、只是不写文件,
+    不删的话后面会把上一次的旧数据当成这次的结果读回来。"""
+    try:
+        os.remove(csv_path)
+    except OSError:
+        pass
+
+
+_NO_DATA = "报告建出来了但没导出数据 —— 这个变量组合/扫频多半没有解(改了变量或几何后需要重新 analyze)"
+
+
 def _to_unit_str(freq):
     """'2.4GHz' 原样;裸数字当 GHz。"""
     s = str(freq).strip()
@@ -417,11 +429,14 @@ def get_s_parameters(ctx, setup=None, sweep=None, port=None, summary_only=True, 
         return {"ok": False, "error": f"CreateReport 各形式都失败: {last_err}",
                 "hint": f"表达式 {expr} 或端口名可能不匹配;检查端口实际名"}
     try:
+        _drop_stale(csv_path)
         oModule.ExportToFile(report_name, csv_path)
         try:
             oModule.DeleteReports([report_name])
         except Exception:
             pass
+        if not os.path.exists(csv_path):
+            return {"ok": False, "error": _NO_DATA, "solution": soln}
     except Exception as e:
         return {"ok": False, "error": f"ExportToFile 失败: {type(e).__name__}: {e}"}
 
@@ -515,11 +530,14 @@ def _report_to_csv(oDesign, soln, exprs, csv_path):
     for args in forms:
         try:
             oModule.CreateReport(*args)
+            _drop_stale(csv_path)
             oModule.ExportToFile(rname, csv_path)
             try:
                 oModule.DeleteReports([rname])
             except Exception:
                 pass
+            if not os.path.exists(csv_path):
+                return False, _NO_DATA
             return True, None
         except Exception as e:
             last = f"{type(e).__name__}: {e}"
@@ -679,11 +697,14 @@ def get_radiation_pattern(ctx, setup=None, sweep="LastAdaptive", sphere="Sphere1
         for args in forms:
             try:
                 oModule.CreateReport(*args)
+                _drop_stale(csv_path)
                 oModule.ExportToFile(rname, csv_path)
                 try:
                     oModule.DeleteReports([rname])
                 except Exception:
                     pass
+                if not os.path.exists(csv_path):
+                    return {"ok": False, "error": f"{_NO_DATA} (phi={phi})", "solution": soln}
                 done = True
                 break
             except Exception as e:

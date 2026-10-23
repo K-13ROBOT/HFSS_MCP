@@ -62,9 +62,10 @@ def _parametrics_of(ctx):
 def create_parametric_sweep(ctx, name, variables, setup=None, save_fields=False):
     state = ctx.get("state")
     setups = list(state.setups.keys()) if state else []
-    if not setups:
-        return {"ok": False, "error": "无 setup,先 create_setup"}
-    setup = setup or setups[0]
+    if setup is None:   # 只有没显式给 setup 才需要 state;重开工程后 state.setups 为空,显式给的不该被挡
+        if not setups:
+            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup)"}
+        setup = setups[0]
 
     # 表达式型变量(如 '0.1*109.1mm'、'MH1-1mm')直接进 OptiParametric 会 InsertSetup com_error。
     # 建参扫前先把每个被扫变量钉成它求值后的纯数值(单位保留),避免崩;只读单值不影响下游引用。
