@@ -24,6 +24,7 @@ BUNDLE = Path(__file__).resolve().parent
 SERVER = BUNDLE / "hfss_mcp_server.py"
 SKILLS_SRC = BUNDLE / "skill"      # 下面每个含 SKILL.md 的子目录 = 一个 skill,全部安装
 SETTINGS_SNIPPET = BUNDLE / "settings.snippet.json"
+COMMANDS_SRC = BUNDLE / "commands"     # 斜杠命令:每个对应一张 flow/ 流程卡
 
 SERVER_NAME = "hfss-agent-native"   # 固定:settings 的 ask 规则 key 在它上(mcp__hfss-agent-native__analyze)
 
@@ -177,11 +178,25 @@ def _lint():
         print("  skill 引用体检:通过")
 
 
+def install_commands(dest_dir: Path):
+    """装斜杠命令到 <dest>/commands/。**只动 hfss-*.md** —— 这个目录是用户共用的,
+    别的命令(投研那套之类)一律不碰、不删、不覆盖。"""
+    if not COMMANDS_SRC.exists():
+        return
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for f in sorted(COMMANDS_SRC.glob("hfss-*.md")):
+        shutil.copy2(f, dest_dir / f.name)
+        n += 1
+    print(f"  [写] {dest_dir}  ({n} 个 /hfss-* 命令;目录内其它命令未动)")
+
+
 def install_skill_user():
     home_skills = Path.home() / ".claude" / "skills"
     print(f"安装 skill 到用户级 {home_skills}:")
     _lint()
     install_skill(home_skills)
+    install_commands(Path.home() / ".claude" / "commands")
     print("\n完成。MCP server 仍需用下面的 `claude mcp add` 命令注册(本脚本不动全局配置)。\n")
     print_instructions()
 

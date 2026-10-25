@@ -103,6 +103,26 @@ def check(verbose=True):
     except Exception as e:
         problems.append(f"[跳过工具检查] {type(e).__name__}: {e}")
 
+    # ⑥ 斜杠命令指向的流程卡是否存在(命令在仓库 commands/,卡在 skill/hfss-design/flow/)
+    cmd_dir = os.path.join(ROOT, "commands")
+    design = os.path.join(SKILLS, "hfss-design")
+    if os.path.isdir(cmd_dir):
+        cards = set()
+        for c in glob.glob(os.path.join(cmd_dir, "hfss-*.md")):
+            txt = _read(c)
+            found = re.findall(r"flow/([a-z][a-z0-9-]*\.md)", txt)
+            if not found:
+                problems.append(f"[命令没指向流程卡] {os.path.relpath(c, ROOT)}")
+            for fn in found:
+                cards.add(fn)
+                if not os.path.exists(os.path.join(design, "flow", fn)):
+                    problems.append(f"[命令指向的卡不存在] {os.path.relpath(c, ROOT)} -> flow/{fn}")
+        # 反向:有卡却没有命令入口
+        for f in glob.glob(os.path.join(design, "flow", "*.md")):
+            fn = os.path.basename(f)
+            if fn not in cards:
+                problems.append(f"[流程卡没有斜杠命令入口] flow/{fn}")
+
     if verbose:
         if problems:
             print(f"skill 引用体检:{len(problems)} 处问题")
