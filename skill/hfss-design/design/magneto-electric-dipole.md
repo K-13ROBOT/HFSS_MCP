@@ -93,7 +93,7 @@ source: Li & Luk, Handbook of Antenna Technologies, Springer 2015
 - 金属振子/壁/地板用零厚度面 + PerfectE(见 `../knowledge/_general.md`);Γ 探针有体积,用 box/polyline 实体。
 - **探针不与振子电接触**(直连馈电型除外),别 unite。
 - 壁与壁之间的地板是短路贴片的短路端,**不能挖空**。
-- 复现时按 `SKILL.md §0` 先出"结构理解表 + 层叠表"给用户确认——ME dipole 的 3D 折叠视图透视失真严重,拓扑最易建歪。
+- 复现时按 ``flow/reproduce-paper.md`` 先出"结构理解表 + 层叠表"给用户确认——ME dipole 的 3D 折叠视图透视失真严重,拓扑最易建歪。
 
 ---
 

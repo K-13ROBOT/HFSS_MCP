@@ -42,4 +42,4 @@ d[24].get_pixmap(dpi=200).save('out.png')   # 注意：索引从 0 开始，d[24
 2. 用 `pymupdf` 扫一遍，把「章节→页」「图/表→页」两张表登记进同目录的 `INDEX.md`（方法见上）；
 3. 如果它是某张 `design/` 卡片的来源，**在那张卡片里回指 `INDEX.md` 的对应行**；
 4. 精读时抽出的**可复用结论**（哪个尺寸控什么、基板厚度容许区间、馈点阻抗这类）
-   写进 `knowledge/<type>.md`；**具体某一款的绝对尺寸不入库**（见 SKILL.md §0.3）。
+   写进 `knowledge/<type>.md`；**具体某一款的绝对尺寸不入库**（见 `flow/capture-learning.md`）。

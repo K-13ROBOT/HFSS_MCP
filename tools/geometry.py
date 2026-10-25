@@ -497,7 +497,7 @@ def create_material(ctx, name, permittivity, loss_tangent=0, permeability=1, con
             "轮廓对象被**原地替换**,结果保留原名(材料/后续赋 PE 照常)。"
             "轴 = center(轴上一点)+ axis_dir(方向向量);pitch = 每圈沿轴前进的距离;turns = 圈数(可小数)。"
             "所有长度与圈数都可用设计变量表达式 → 螺旋结构可直接参扫/优化。"
-            "适用范围与建法见 SKILL.md §5.7。"),
+            "适用范围与建法见 `flow/geometry-advanced.md`。"),
         "parameters": {
             "type": "object",
             "properties": {

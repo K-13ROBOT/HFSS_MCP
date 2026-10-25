@@ -250,7 +250,7 @@ def delete_sweep(ctx, setup, names=None, confirm=False):
         "description": ("删除求解 setup。**必须显式 confirm=true 才真删**(不带只回显现有 setup 清单及各自的扫频);"
             "名字写错则整批不动。⚠️ **删 setup 会连带删掉其下所有扫频和已求解结果,不可撤销** —— "
             "删之前先确认要保留的曲线已经取过数。注意参扫是按 ID 引用 setup 的,删了再同名重建也接不上"
-            "(见 SKILL.md §8,要用 delete_parametric 清孤儿参扫)。"),
+            "(见 `flow/tuning.md`,要用 delete_parametric 清孤儿参扫)。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -861,7 +861,7 @@ def cleanup_solutions(ctx, scope="fields", variations=None, keep_mesh=False, con
         "description": ("建**本征模**求解设置(HfssEigen):不要端口、不要激励,直接解结构自身的谐振频率与 Q。"
             "**design 必须是 Eigenmode 类型**(new_design 时传 solution_type='Eigenmode'),"
             "驱动类型的 design 建不了。min_frequency 取略低于预期最低模(给高了会漏掉低阶模)。"
-            "建完用 analyze 跑(与驱动求解同一个工具),再 get_eigenmodes 取结果。用法见 SKILL.md §6.4。"),
+            "建完用 analyze 跑(与驱动求解同一个工具),再 get_eigenmodes 取结果。用法见 `flow/eigenmode.md`。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -922,7 +922,7 @@ def create_eigenmode_setup(ctx, name, min_frequency, num_modes=1, max_passes=6,
     "function": {
         "name": "get_eigenmodes",
         "description": ("取本征模结果:各模的**谐振频率**和 **Q**,外加相邻模间隔 spacing_pct。调用前必须已 analyze。"
-            "**Q=0 表示无耗**(真空+PEC 的理想腔体),不是出错。结果怎么读见 SKILL.md §6.4。"),
+            "**Q=0 表示无耗**(真空+PEC 的理想腔体),不是出错。结果怎么读见 `flow/eigenmode.md`。"),
         "parameters": {"type": "object", "properties": {
             "setup": {"type": "string", "description": "setup 名,不传用第一个"},
             "sweep": {"type": "string", "default": "LastAdaptive"},

@@ -198,7 +198,7 @@ def _enable_sensitivity(oDesign, names):
         "description": ("建灵敏度分析:在当前工作点附近算**每个变量对指标的偏导**,回答\"该动哪个变量\"。"
             "与参扫的分工:参扫是笛卡尔积铺开看全貌,灵敏度是工作点附近取少量点求梯度,便宜得多。"
             "**要求该 setup 已有解**(梯度在工作点附近算)。建完用 run_sensitivity 跑。"
-            "什么时候该先做这一步,见 SKILL.md §8.0。"),
+            "什么时候该先做这一步,见 `flow/tuning.md`。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -334,7 +334,7 @@ def run_sensitivity(ctx, name):
         "description": ("取灵敏度结果:每个变量对指标的一阶/二阶偏导,按影响力排序。"
             "`dominant` 是最灵的变量,`relative` 是各变量相对它的权重(0~1),"
             "`nonlinearity` = |二阶导/一阶导|。⚠️ 一阶导带 SI 单位(每米),绝对值不直观,"
-            "**判断用 relative 比值**。怎么据此定扫参策略,见 SKILL.md §8.0。"),
+            "**判断用 relative 比值**。怎么据此定扫参策略,见 `flow/tuning.md`。"),
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string", "description": "灵敏度 setup 名"},
             "csv_path": {"type": "string", "description": "可选:导出 CSV 的落地路径,不传放 exports/"},
@@ -443,7 +443,7 @@ def _enable_statistical(oDesign, names):
             "回答的是\"按这个加工公差投产,有多少比例的板子能达标\" —— 仿真漂亮但批量下来一半不合格,"
             "就是没做过这一步。与灵敏度的分工:灵敏度问\"动哪个变量\",统计分析问\"变量抖动时指标散多少\"。"
             "**代价是 trials 次完整求解**,调用前务必预告耗时。建完用 run_statistical 跑。"
-            "什么时候该做、结果怎么用,见 SKILL.md §8.5。"
+            "什么时候该做、结果怎么用,见 `flow/tuning.md`。"
         ),
         "parameters": {
             "type": "object",
@@ -600,7 +600,7 @@ def run_statistical(ctx, name):
             "取统计分析结果:指标在公差抖动下的**分布**(均值/标准差/最值/分位数),"
             "给了 spec 还会算**良率**(满足规格的试验占比)。"
             "良率低说明设计对公差敏感 —— 配合灵敏度分析能定位是哪个变量在拖后腿,"
-            "进而决定该找板厂把哪一项卡紧。结果怎么用见 SKILL.md §8.5。"
+            "进而决定该找板厂把哪一项卡紧。结果怎么用见 `flow/tuning.md`。"
         ),
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string", "description": "统计 setup 名"},

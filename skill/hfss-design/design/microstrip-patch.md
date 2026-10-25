@@ -59,4 +59,4 @@ c = 3e8 m/s,f₀ = 中心频率。
 ## 建模配方要点
 - 层叠 z 顺序固定:地 z=0 / 基板 0→h / 贴片 z=h(详见关联经验,建完 `get_object_bbox` 自检)。
 - inset = 在贴片靠馈电边 `subtract` 两条对称槽 + 50Ω 线伸进 notch 到 y₀。
-- 求解流程走 SKILL §6;先 L 对频率,再扫 y₀ 压 S11。
+- 求解流程走 `flow/s-parameters.md`;先 L 对频率,再扫 y₀ 压 S11。
