@@ -166,7 +166,7 @@ def _bbox_of(oEditor, name):
         "name": "get_object_bbox",
         "description": ("取对象的轴向包围盒(xyz 最小/最大,模型单位默认 mm)。不传 name 则返回所有对象的盒。"
             "曲面体(球/圆柱)可能取不到顶点而返回 null,长方体/矩形片/多边形片都准。"
-            "求解前该拿它核对哪些项,见 SKILL.md §6 第 6 步。"),
+            "求解前该拿它核对哪些项,见 `flow/s-parameters.md`。"),
         "parameters": {
             "type": "object",
             "properties": {

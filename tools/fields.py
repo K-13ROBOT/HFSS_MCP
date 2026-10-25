@@ -10,7 +10,7 @@
 
 **前提:必须有存场的解**(create_sweep 的 save_fields=True,或用 LastAdaptive 的自适应解)。
 场数据贵(实测 ~90-100 秒/点、几百 MB/点),所以场诊断只在**单频点**用,不跟扫频做,
-用完 delete_sweep 清掉 —— 见 SKILL.md §6.9 与 knowledge/_solving.md。
+用完 delete_sweep 清掉 —— 见 `flow/diagnose-current.md` 与 knowledge/_solving.md。
 """
 
 import os
@@ -143,9 +143,9 @@ def _features(xs, ys, null_frac):
         "description": ("沿一条 polyline 取**表面电流 |J| 的分布**(幅度 vs 沿线距离)+ 判据:"
             "峰值与位置、内部零点数、首尾衰减 dB。**模次 = n_nulls + 1**(端点天然为零不计)。"
             "其余 get_* 只测进去多少/出来多少,这个看结构上实际流了什么。"
-            "两条硬前提,违反了会拿到空数据或假读数(详见 SKILL.md §6.9):"
+            "两条硬前提,违反了会拿到空数据或假读数(详见 `flow/diagnose-current.md`):"
             "**采样线必须在 analyze 之前画好**(求解后建 polyline 会让解作废,且 COM 无任何提示);"
-            "**线要略短于导体、避开馈电点**。什么时候该调见 §6.9,别每次取结果都调。"),
+            "**线要略短于导体、避开馈电点**。什么时候该调见 `flow/diagnose-current.md`,别每次取结果都调。"),
         "parameters": {
             "type": "object",
             "properties": {

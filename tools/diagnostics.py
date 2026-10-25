@@ -75,7 +75,7 @@ def _summarize(msgs):
         "name": "get_messages",
         "description": ("读 HFSS **消息窗口**(Message Manager)。COM 异常只反映「调用失败」,而端口缺积分线、"
             "材料未定义、边界重叠、自适应不收敛、解被作废这类抱怨**只出现在消息窗口里**。"
-            "返回按 error/warning/info 分桶 + 最近 limit 条原文。什么时候必读,见 SKILL.md §6 第 10 步。"),
+            "返回按 error/warning/info 分桶 + 最近 limit 条原文。什么时候必读,见 `flow/s-parameters.md`。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -123,7 +123,7 @@ def get_messages(ctx, project=None, design=None, severity=0, limit=50, errors_on
         "name": "validate_design",
         "description": ("跑 HFSS 自带的 Validation Check:端口没积分线 / setup 没绑激励 / 边界重叠 / 材料缺失。"
             "与 get_object_bbox 的分工:bbox 查几何层叠搭接(我们自己的自检),"
-            "本工具查 **HFSS 认不认**这个 design。analyze 之前必调,见 SKILL.md §6 第 8 步。"),
+            "本工具查 **HFSS 认不认**这个 design。analyze 之前必调,见 `flow/s-parameters.md`。"),
         "parameters": {"type": "object", "properties": {}},
     },
 })

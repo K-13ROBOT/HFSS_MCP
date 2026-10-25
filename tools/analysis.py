@@ -184,7 +184,7 @@ def _sweeps_of(oDesign, setup):
         "name": "delete_sweep",
         "description": ("删除 setup 上的扫频。`create_sweep` 不能同名覆盖,建错了只能先删再重建。"
             "**必须显式 confirm=true 才真删**(不带只回显该 setup 现有扫频清单);名字写错则整批不动。"
-            "⚠️ 删扫频会同时丢掉它已求解的结果数据。调参阶段为什么要主动清存场扫频,见 SKILL.md §6 第 7 步。"),
+            "⚠️ 删扫频会同时丢掉它已求解的结果数据。调参阶段为什么要主动清存场扫频,见 `flow/s-parameters.md`。"),
         "parameters": {
             "type": "object",
             "properties": {

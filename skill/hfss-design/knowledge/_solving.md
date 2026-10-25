@@ -281,6 +281,17 @@ C4 结构的 S 矩阵是循环阵,按顺序相位馈电时**四个口的 ActiveS
   顺手在该 setup 上挂一条 `Discrete + save_fields` 的扫频,一次求解同时拿到方向图和轴比曲线,省一轮。
 - 引申:realized gain 天生含失配。要看天线本身的方向性,别在失配频点上比较增益。
 
+## ⚠️ COM 复制 design(`CopyDesign`+`Paste`)会把多频自适应 setup 重置成单频 5 GHz
+- 现象(2025.2 实测):原 design 的 3 个 setup 都是 MultiFrequency 27/38.5 GHz;`oProject.CopyDesign` + `Paste`
+  出来的副本里,setup 名、扫频(含离散存场扫频)都在,但 `Solution Freq Type` 变成 Single、`Solution Freq = 5GHz`。
+  在 24–40 GHz 天线上照样"收敛"(5 遍 ΔS 0.012),S11 却全乱:H 口低频段最差 −1.4 dB(真值 −10.9)。
+  看着像"新加的结构把匹配搞坏了",差点去改接头。
+- 查法:`oDesign.GetChildObject("Analysis").GetChildObject(s).GetPropValue("Solution Freq Type"/"Solution Freq")`。
+- 修法:`EditSetup` 重写,多频表必须用 `NAME:` 嵌套写法(见 `_general.md` 同款坑):
+  `"SolveType:=", "MultiFrequency", ["NAME:MultipleAdaptiveFreqsSetup", ["NAME:AdaptAt","Frequency:=","27GHz","Delta:=",0.02], ...]`。
+  `SetPropValue("Solution Freq Type","Multiple")` 只会给出 2.5/5/10 GHz 默认表。EditSetup 不会删扫频。
+- ⇒ **复制 design 后第一件事:核对每个 setup 的自适应频率**;收敛记录里网格单元数明显少于原 design 也是信号。
+
 ## 本征模 setup 不要发 `MeshLink` 块(老版本会直接拒绝)
 - 现象:`InsertSetup("HfssEigen", ...)` 在 2019.2 上报 com_error,消息窗口写
   `The partner project name cannot be empty. Please finish the setup at the Setup Link dialog`。

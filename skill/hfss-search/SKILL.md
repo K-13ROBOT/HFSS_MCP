@@ -9,14 +9,14 @@ description: >-
 
 # 天线文献检索与提炼
 
-补的是 `hfss-design` §10 正向设计闭环第 1 步那个死胡同:**卡片库没有匹配拓扑时怎么办**。
+补的是 `hfss-design` 的 `flow/design-loop.md` 第 1 步那个死胡同:**卡片库没有匹配拓扑时怎么办**。
 本 skill 的交付物是**「结构理解表 + 起手尺寸」交用户确认**,不是卡片 —— 卡片是整条流程走完、
 仿真达标、用户点头之后才录的(见 §5)。
 
 ## 0. 先查本地库 —— 硬门槛,不许跳
 
 **任何情况下先调 `search_designs`**(传 frequency_ghz / polarization / topology / min_gain_dbi),
-命中就用 `read_design_card` 取正文,直接走 `hfss-design` §10 第 2 步缩放建模,**不要联网**。
+命中就用 `read_design_card` 取正文,直接走 `hfss-design` 的 `flow/design-loop.md` 第 2 步缩放建模,**不要联网**。
 只有确认库里没有可用拓扑,才进本 skill 后续步骤。
 
 理由:库里的卡是自己验证过的,可信度和可用性都高于任何论文;联网检索慢且贵。
@@ -122,7 +122,7 @@ description: >-
 > **起手尺寸是一次性用品**:它服务于本次建模,**不入库**。换个频率或基板它就作废,
 > 留在库里只会误导后来的检索。
 
-确认无误后,交回 `hfss-design` §10 第 2 步:`set_variable` 落变量 → 建模 → `analyze`
+确认无误后,交回 `hfss-design` 的 `flow/design-loop.md` 第 2 步:`set_variable` 落变量 → 建模 → `analyze`
 → `check_design_targets` 对标 → 不达标走扫参/优化。
 
 ## 6. 收工沉淀:达标之后,且用户点头,才录库
