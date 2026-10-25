@@ -21,16 +21,30 @@
    - 地板/基板 xy 范围 **盖住**辐射体(gnd 的 xmin/xmax/ymin/ymax ⊇ patch 的)
    - 没有该分离的对象 z 范围重叠(穿模)
    - 发现不对 → `delete_object` 改正后重建,**绝不带着错几何 analyze**(那是又错又慢的根源)
-7. `create_setup`(频率取工作频率)→ `create_sweep`(覆盖工作频率)。
+7. **【建 setup 之前先往后看一步 —— 漏了就得整解重跑】**
+   问自己:**这个设计后面要取远场吗?要做电流诊断吗?** 要的话现在就把前置条件办了,
+   这三样都是"事后补 = 重新求解一遍":
+
+   | 后面要做 | 现在必须先办 | 补办的代价 |
+   |---|---|---|
+   | 远场(增益/轴比/方向图)| **`create_infinite_sphere` 必须在 `create_setup` 之前建**;扫频要 `sweep_type='Discrete'` + `save_fields=True` | setup 建完再补球面,得重建 setup 重解 |
+   | 电流诊断 | **采样线(`create_polyline`)必须在 `analyze` 之前画好** | 求解后新画线算改几何,HFSS 把解整个作废且 COM 无任何提示 |
+   | 轴比 vs 频率(`get_axial_ratio`)| 同远场,且扫频**必须** Discrete + save_fields(只设 `save_rad_fields` 不生效) | 整条扫频重解 |
+
+   拿不准后面要不要 → **就当要**:无穷远球面不参与求解、采样线不影响网格,
+   都是零成本;事后补才贵。细节分别见 [`farfield.md`](farfield.md) 和
+   [`diagnose-current.md`](diagnose-current.md) 的前置条件那段。
+
+8. `create_setup`(频率取工作频率)→ `create_sweep`(覆盖工作频率)。
    **存场扫频(`save_fields=True`)要当耗材管**:每条扫频在之后**每次** analyze 里都会重算,存场频点每个要写完整三维场(实测 ~90-100 秒/点、几百 MB/点),堆几条下来单轮求解能从十几分钟涨到一两个小时。取场/取远场用完就 `delete_sweep(setup, names, confirm=True)` 清掉,只留调参真正要看的那条
    - **更稳的做法是按用途分 setup**:调参一个(只挂一条插值扫频、`save_fields=False`),取远场另一个(存场扫频只放要看的那几个频点)。`analyze(setup=...)` 只跑指定的那个,于是调参轮次始终是"最短的那条";远场 setup 只在尺寸定稿后跑一次。比"用完再删"少丢结果、也少一次重算
    - 代价要按**整轮**算,别只看扫频本身:几何一改,自适应网格要重做,setup 下**所有**扫频都跟着重算。所以拖慢的不是"多存了几个场",而是"每轮都重存一遍"
-8. **【HFSS 自检 —— analyze 前必做,治"配置漏"】** 调 `validate_design` 跑 HFSS 自带的 Validation Check:端口缺积分线、setup 没绑激励、边界重叠、材料缺失——30 秒查出来,省得求解 10 分钟后才发现白跑。`passed=false` 先修完再往下。**与第 6 步分工**:bbox 查**几何**建歪没(我们自己的自检),这步查 **HFSS 认不认**这个 design。
+9. **【HFSS 自检 —— analyze 前必做,治"配置漏"】** 调 `validate_design` 跑 HFSS 自带的 Validation Check:端口缺积分线、setup 没绑激励、边界重叠、材料缺失——30 秒查出来,省得求解 10 分钟后才发现白跑。`passed=false` 先修完再往下。**与第 6 步分工**:bbox 查**几何**建歪没(我们自己的自检),这步查 **HFSS 认不认**这个 design。
    - 判定以 HFSS 返回码为准。**老版本(2019.2 实测)消息窗口写入滞后可达几十秒**,所以 `passed=false` 但 `errors` 为空是正常的——过一会儿调 `get_messages` 才看得到"错在哪"(2025.2 是即时的)。
-9. `analyze` 跑求解(阻塞)
-10. **【求解后先读消息窗口】** 调 `get_messages`(默认只回当前工程/design,`errors_only=true` 省 context)。COM 只反映"调用失败",而端口阻抗偏离归一化值、自适应不收敛、材料/边界的抱怨**只写在消息窗口里**——"跑通了但数不对"时先读它,别上来就改几何。
-11. 取结果:`get_s_parameters` 拿 S11/谐振/-10dB 带宽;`get_input_metrics` 拿 **VSWR + 输入阻抗 Zin(R+jX) + VSWR<2 带宽(含中心频率/分数带宽%)**——要看匹配好不好、阻抗实不实在 50Ω 时用它
-12. **【只在需要时】指标不对且不知道为什么** → 进 `diagnose-current.md` 看电流分布,**别盲调**
+10. `analyze` 跑求解(阻塞)
+11. **【求解后先读消息窗口】** 调 `get_messages`(默认只回当前工程/design,`errors_only=true` 省 context)。COM 只反映"调用失败",而端口阻抗偏离归一化值、自适应不收敛、材料/边界的抱怨**只写在消息窗口里**——"跑通了但数不对"时先读它,别上来就改几何。
+12. 取结果:`get_s_parameters` 拿 S11/谐振/-10dB 带宽;`get_input_metrics` 拿 **VSWR + 输入阻抗 Zin(R+jX) + VSWR<2 带宽(含中心频率/分数带宽%)**——要看匹配好不好、阻抗实不实在 50Ω 时用它
+13. **【只在需要时】指标不对且不知道为什么** → 进 `diagnose-current.md` 看电流分布,**别盲调**
 
 ## 这张卡做完去哪
 - 要**增益/轴比/方向图** → `farfield.md`(多端口记得先设幅相)

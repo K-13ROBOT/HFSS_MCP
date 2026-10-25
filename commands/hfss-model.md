@@ -12,7 +12,7 @@
 - 跑 S 参数 / 完整求解一个设计 → `flow/s-parameters.md`
   ⚠️ **顺序敏感**;求解前 bbox + validate 两道自检不许跳
 - 取远场(增益/轴比/HPBW/前后比) → `flow/farfield.md`
-  ⚠️ **多端口必须先 `set_port_excitation` 设幅相**,否则算的是同相馈电
+  ⚠️ **无穷远球面必须在 `create_setup` 之前建**(事后补要重解);**多端口必须先 `set_port_excitation` 设幅相**,否则算的是同相馈电
 - 非标准馈电(缝隙/近耦合/CPW/差分/多层) → `flow/feeding.md`
   ⚠️ **端口 sheet 绝不赋 PE**;积分线方向上要有非零跨度
 - 腔体/滤波器/DRA,要谐振频率与 Q → `flow/eigenmode.md`
