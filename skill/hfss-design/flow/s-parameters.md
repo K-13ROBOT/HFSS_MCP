@@ -1,7 +1,10 @@
 # 流程:S 参数仿真(驱动求解)
 
 > 建几何 → 加端口边界 → 双自检 → 求解 → 取结果 的完整顺序。**顺序敏感**,跳步会白跑。
-> 本征模求解不走这条(不要端口),见 `SKILL.md` `eigenmode.md`。
+> 本征模求解不走这条(不要端口),见 [`eigenmode.md`](eigenmode.md)。
+> **配套经验:[`../knowledge/_solving.md`](../knowledge/_solving.md)** —— 本卡讲步骤,
+> 那边讲这些步骤会踩什么坑(setup 怎么组织、求解崩了怎么判、超时≠失败、
+> 内存与 license 的硬限)。**要跑长求解、或结果可疑时必读。**
 
 1. `set_variable` 定义关键参数
 2. 建几何(box / rectangle 等)

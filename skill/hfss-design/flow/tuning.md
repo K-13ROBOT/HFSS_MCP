@@ -6,6 +6,9 @@
 > `failed_metrics` 没少一项 → 停,去 [diagnose-current.md](diagnose-current.md) 看机理。
 > 选不出该动哪个变量 → 先做本页的灵敏度分析。
 > 「方向是对的、只是力度不够」是最贵的自我说服,每信一次就是一整轮机时。
+>
+> **配套经验:[`../knowledge/_optimization.md`](../knowledge/_optimization.md)** —— 本卡讲步骤,
+> 那边讲判断(参扫 vs 手工逐点怎么选、频率旋钮的线性缩放律、别追小于仿真重复性的余量)。
 
 ## 扫之前先问一句:该动哪个变量(灵敏度分析)
 候选变量超过一个、又拿不准该扫谁时,**先 `create_sensitivity` + `run_sensitivity`**,
