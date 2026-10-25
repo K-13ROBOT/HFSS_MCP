@@ -27,29 +27,31 @@ _TUNE_ROWS = ("不达标", "不知道为什么")
 
 
 def routing_rows():
-    """解析 SKILL.md 路由表 → [(任务, 去向)]。表头/分隔行跳过。"""
+    """解析 SKILL.md 路由表 → [(任务, 去向, 铁律)]。表头/分隔行跳过。
+    第三列是"就算不读卡也要记住的那一条"——命令里同样带上:卡不一定在上下文里,
+    命令体和路由表一定在。"""
     txt = io.open(CORE_MD, encoding="utf-8").read()
-    m = re.search(r"\|\s*任务\s*\|\s*必须先读\s*\|\n\|[-\s|]+\|\n((?:\|.*\n)+)", txt)
+    m = re.search(r"\|\s*任务\s*\|\s*必须先读\s*\|.*\n\|[-\s|]+\|\n((?:\|.*\n)+)", txt)
     if not m:
         sys.exit("!! 解析不到 SKILL.md 的路由表 —— 表头是不是改了?"
-                 "(期望 | 任务 | 必须先读 |)")
+                 "(期望 | 任务 | 必须先读 | ... |)")
     rows = []
     for line in m.group(1).strip().split("\n"):
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if len(cells) >= 2 and cells[0]:
-            rows.append((cells[0], cells[1]))
+            rows.append((cells[0], cells[1], cells[2] if len(cells) > 2 else ""))
     return rows
 
 
 def model_branches():
     """建模命令的分支列表,从路由表生成(排除调参/诊断那两行)"""
     out = []
-    for task, dest in routing_rows():
+    for task, dest, rule in routing_rows():
         if any(k in task for k in _TUNE_ROWS):
             continue
         # 路由表里是 [`flow/x.md`](flow/x.md) — 命令里只要反引号形式
         dest = re.sub(r"\[`([^`]+)`\]\([^)]+\)", r"`\1`", dest)
-        out.append(f"- {task} → {dest}")
+        out.append(f"- {task} → {dest}" + (f"\n  ⚠️ {rule}" if rule else ""))
     return "\n".join(out)
 
 

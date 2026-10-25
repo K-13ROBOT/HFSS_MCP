@@ -16,3 +16,8 @@ S 参数流程外加:
 - 要**整条方向图曲线**(单个已求解设计,增益 vs 角度)→ `get_radiation_pattern`:默认导 E面(φ=0)/H面(φ=90)两刀,返回 theta/gain 数组 + 峰值(CSV 自动落在 exports/,无需传路径);CP 天线传 `polarization='lhcp'/'rhcp'`。
   对多频点的存场扫频(`Discrete + save_fields=True`)一次取全部频点:每刀给 `by_freq`,另有 `boresight_gain_dB` 汇总轴向增益 vs 频率;
   只要一个频点就传 `freq='38.5GHz'`。⚠️ theta 只扫 0–180°,所以 φ=0 那刀只覆盖 +x 半边,另一半在 φ=180,要完整切面就把 180deg 也加进 `phi_cuts`
+
+## 这张卡做完去哪
+- 方向图/轴比**不达标** → `tuning.md`;调不动 → `diagnose-current.md`
+- 远场取完、磁盘吃紧 → 可以 `cleanup_solutions` 清场了(**顺序别反:清完场远场就取不到了**)
+- 达标了 → `capture-learning.md` 沉淀

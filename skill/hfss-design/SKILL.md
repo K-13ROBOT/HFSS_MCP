@@ -17,25 +17,35 @@ description: >-
 具体流程全在 `flow/` 里,下表按任务给出**必须先读的卡**。
 **不是"相关时可以参考",是读了才开工。** 跳过去凭印象做,踩的就是卡里写死的那些坑。
 
-| 任务 | 必须先读 |
-|---|---|
-| **开工第一件事**(任何天线任务) | [`flow/capture-learning.md`](flow/capture-learning.md) — 先读经验库和卡片库,站在过往经验上 |
-| 照论文尺寸复现 | [`flow/reproduce-paper.md`](flow/reproduce-paper.md) — 先解析结构图,治"建歪" |
-| 给的是**目标/规格**不是现成尺寸 | [`flow/design-loop.md`](flow/design-loop.md) — 正向设计闭环 |
-| 跑 S 参数 / 完整求解一个设计 | [`flow/s-parameters.md`](flow/s-parameters.md) — 顺序敏感,跳步会白跑 |
-| 取远场(增益/轴比/HPBW/前后比) | [`flow/farfield.md`](flow/farfield.md) |
-| 非标准馈电(缝隙/近耦合/CPW/差分/多层) | [`flow/feeding.md`](flow/feeding.md) |
-| 指标不达标要调(扫参/灵敏度/公差/优化) | [`flow/tuning.md`](flow/tuning.md) — **先问该动哪个变量,再扫** |
-| 指标不对但**不知道为什么** | [`flow/diagnose-current.md`](flow/diagnose-current.md) — 看机理,别盲调 |
-| 腔体/滤波器/DRA,要谐振频率与 Q | [`flow/eigenmode.md`](flow/eigenmode.md) — 不要端口 |
-| 无限阵 / FSS / 超表面单元 | [`flow/periodic.md`](flow/periodic.md) |
-| 阵列复制、改网格、建螺旋 | [`flow/geometry-advanced.md`](flow/geometry-advanced.md) |
-| 板厂叠层表还原多层板 | 转 `hfss-stackup` skill |
-| 要找文献 / 卡片库没有匹配拓扑 | 转 `hfss-search` skill |
+| 任务 | 必须先读 | **就算不读卡也要记住这条** |
+|---|---|---|
+| **开工第一件事**(任何天线任务) | [`flow/capture-learning.md`](flow/capture-learning.md) | 不读经验库 = 每次从零踩坑 |
+| 照论文尺寸复现 | [`flow/reproduce-paper.md`](flow/reproduce-paper.md) | **尺寸只从参数表/正文抽,绝不在图上量**;拓扑有歧义先让用户确认 |
+| 给的是**目标/规格**不是现成尺寸 | [`flow/design-loop.md`](flow/design-loop.md) | 先对标再调、调完再对标,别靠眼估说"差不多达标" |
+| 跑 S 参数 / 完整求解一个设计 | [`flow/s-parameters.md`](flow/s-parameters.md) | **顺序敏感**;求解前 bbox + validate 两道自检不许跳 |
+| 取远场(增益/轴比/HPBW/前后比) | [`flow/farfield.md`](flow/farfield.md) | **多端口必须先 `set_port_excitation` 设幅相**,否则算的是同相馈电 |
+| 非标准馈电(缝隙/近耦合/CPW/差分/多层) | [`flow/feeding.md`](flow/feeding.md) | **端口 sheet 绝不赋 PE**;积分线方向上要有非零跨度 |
+| 指标不达标要调(扫参/灵敏度/公差/优化) | [`flow/tuning.md`](flow/tuning.md) | **先问该动哪个变量再扫**;公差分析等达标之后再做 |
+| 指标不对但**不知道为什么** | [`flow/diagnose-current.md`](flow/diagnose-current.md) | **采样线必须在 `analyze` 之前画好**(求解后画会让解作废且无提示);线要避开馈电点 |
+| 腔体/滤波器/DRA,要谐振频率与 Q | [`flow/eigenmode.md`](flow/eigenmode.md) | **design 必须建成 Eigenmode 类型**,不要端口;Q=0 是无耗不是出错 |
+| 无限阵 / FSS / 超表面单元 | [`flow/periodic.md`](flow/periodic.md) | **不要 `create_open_region`**,那是孤立天线的边界 |
+| 阵列复制、改网格、建螺旋 | [`flow/geometry-advanced.md`](flow/geometry-advanced.md) | **切 sheet 只能用 `split`**,solid 去 subtract 会把 sheet 一起删掉 |
+| 板厂叠层表还原多层板 | 转 `hfss-stackup` skill | 读错一条行业约定,整板厚度就错 |
+| 要找文献 / 卡片库没有匹配拓扑 | 转 `hfss-search` skill | 先查本地库,别一上来就联网 |
+
+> 第三列是**各卡里最常被违反的那一条**,放这儿是因为:路由表一定在上下文里,卡不一定。
+> 但它只够让你知道"有这么回事",**不能替代读卡** —— 每条背后的判据、代价、例外都在卡里。
 
 **收工同样要回 [`flow/capture-learning.md`](flow/capture-learning.md)** —— 把这次的坑记进
 `knowledge/`、把验证过的设计录成 `design/` 卡片。这是整套系统复利增长的机制,跳过它
 每次复现都从零踩坑。
+
+**⚠️ 上下文被压缩之后,`flow/` 的卡会丢 —— 必须重读。**
+长会话里上下文会被压缩成摘要。压缩后本文件(SKILL.md)会被重新注入,
+但**你之前用 Read 读过的 `flow/*.md` 不会**,只剩摘要里的一两句。
+所以:**发现看到的是摘要而非完整历史、而任务还没做完 → 立刻重读当前任务的流程卡**。
+尤其在做这几件事之前重读:求解(`analyze`)、删除(`delete_*` / `cleanup_solutions`)、
+取场、提交结论。第三列那几条铁律能提醒你"有这么回事",但细节只在卡里。
 
 **⚠️ 路由不是只在开工时走一次。任务性质中途会变,变了就回来重查这张表。**
 最常见的转变:开工是"正向设计"(`flow/design-loop.md`)→ 调了几轮调不动 →

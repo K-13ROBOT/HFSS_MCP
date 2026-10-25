@@ -33,7 +33,8 @@ def _assign_lumped(oDesign, name, sheet, int_start, int_end, impedance):
         "name": "create_lumped_port",
         "description": ("在已建好的 sheet 上建集中端口(Lumped Port,Driven Modal)。"
                         "需显式给积分线两端 int_start→int_end(从参考导体指向激励侧,落在 sheet 两条对边上)。"
-                        "**端口 sheet 不要赋 PE**。自定义形状端口用这个;矩形侧馈用 create_edge_feed_port,同轴探针用 create_coax_feed_port。"),
+                        "**端口 sheet 不要赋 PE**。自定义形状端口用这个;矩形侧馈用 create_edge_feed_port,同轴探针用 create_coax_feed_port。"
+                        "缝隙耦合/近耦合/CPW/差分/多层这类非标准馈电怎么用图元手搭,见 `flow/feeding.md`。"),
         "parameters": {
             "type": "object",
             "properties": {

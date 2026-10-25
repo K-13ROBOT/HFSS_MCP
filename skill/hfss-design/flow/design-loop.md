@@ -19,3 +19,8 @@
 6. **收工沉淀**:做出达标设计后,按 `capture-learning.md` 把它录成/更新 `design/<type>.md`(归一化尺寸 + 实测 performance + 出处),让卡片库复利增厚。
 
 要点:**先对标再调、调完再对标**,每轮用 `check_design_targets` 闭合;多目标在 targets 里一次列全(频率~=、S11/AR<=、增益/带宽>=),别只盯一个把别的调坏(尤其 `tuning.md` 提的多端口跷跷板、方向图频率稳定性守恒)。
+
+## 这张卡做完去哪
+闭环里每一步各自指向具体的卡:建模 → `s-parameters.md`、调 → `tuning.md`、
+调不动 → `diagnose-current.md`、达标沉淀 → `capture-learning.md`。
+**卡片库没有匹配拓扑** → 转 `hfss-search` skill 查文献。

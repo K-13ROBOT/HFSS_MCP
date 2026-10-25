@@ -260,7 +260,8 @@ def _check_one(metric, meas, spec):
                     "get_radiation_pattern 取数填 measured。目标给标量用默认方向(频率~=、s11/vswr/AR<=、"
                     "增益/带宽/前后比>=);要自定义方向/容差就给 {op, value, tol 或 tol_pct}。"
                     "常用指标名:resonant_freq_ghz, s11_db, vswr, bw_pct, bw_mhz, peak_gain_dbi, "
-                    "axial_ratio_db, front_to_back_db, hpbw_deg, isolation_db。"),
+                    "axial_ratio_db, front_to_back_db, hpbw_deg, isolation_db。"
+                        "整条正向设计闭环(检索→缩放→建模→对标→定向调)见 `flow/design-loop.md`。"),
     "parameters": {"type": "object", "properties": {
         "measured": {"type": "object", "description": "实测指标 {名: 数值},如 {'resonant_freq_ghz':2.46,'s11_db':-11.7,'bw_pct':3.5}"},
         "targets": {"type": "object", "description": "目标规格 {名: 数值 或 {op,value,tol/tol_pct}},如 {'resonant_freq_ghz':2.45,'s11_db':-10,'bw_pct':3}"}},

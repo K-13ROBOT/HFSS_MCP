@@ -65,7 +65,8 @@ _AXIS = {"x": 0, "y": 1, "z": 2}
         "name": "assign_periodic_boundaries",
         "description": ("给单元盒的 ±X、±Y 四个侧面自动配主从(Master/Slave)周期边界——无限阵/FSS/超表面"
                         "单元分析的必备项。晶格矢量从盒子包围盒推(轴对齐长方体)。扫描角 θ/φ 给入射方向,"
-                        "须与 Floquet 端口一致。配完再 assign_floquet_port。**别和 create_open_region 混用**。"),
+                        "须与 Floquet 端口一致。配完再 assign_floquet_port。**别和 create_open_region 混用**。"
+                        "整条周期单元流程见 `flow/periodic.md`。"),
         "parameters": {
             "type": "object",
             "properties": {
