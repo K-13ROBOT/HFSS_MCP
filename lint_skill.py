@@ -117,11 +117,14 @@ def check(verbose=True):
                 cards.add(fn)
                 if not os.path.exists(os.path.join(design, "flow", fn)):
                     problems.append(f"[命令指向的卡不存在] {os.path.relpath(c, ROOT)} -> flow/{fn}")
-        # 反向:有卡却没有命令入口
-        for f in glob.glob(os.path.join(design, "flow", "*.md")):
+        # 反向检查:命令集是粗粒度的(只有 建模/优化 两个),一张卡没被命令直接点名很正常
+        # ——细分由 SKILL.md 的路由表负责。所以这里改查**路由表有没有覆盖全部卡**。
+        core_txt = _read(os.path.join(design, "SKILL.md"))
+        for f in sorted(glob.glob(os.path.join(design, "flow", "*.md"))):
             fn = os.path.basename(f)
-            if fn not in cards:
-                problems.append(f"[流程卡没有斜杠命令入口] flow/{fn}")
+            if f"flow/{fn}" not in core_txt and fn not in "".join(
+                    _read(c) for c in glob.glob(os.path.join(cmd_dir, "hfss-*.md"))):
+                problems.append(f"[流程卡既不在路由表也不在命令里,没人会读到它] flow/{fn}")
 
     if verbose:
         if problems:

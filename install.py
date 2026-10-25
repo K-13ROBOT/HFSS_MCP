@@ -184,11 +184,20 @@ def install_commands(dest_dir: Path):
     if not COMMANDS_SRC.exists():
         return
     dest_dir.mkdir(parents=True, exist_ok=True)
+    keep = {f.name for f in COMMANDS_SRC.glob("hfss-*.md")}
+    # 清掉本 bundle 不再提供的旧 hfss-* 命令(命令集收缩过:曾按 flow/ 一卡一命令发过 11 个)。
+    # **只删 hfss-* 前缀的**——这个目录是用户共用的,别的命令一律不碰。
+    stale = [f for f in dest_dir.glob("hfss-*.md") if f.name not in keep]
+    for f in stale:
+        f.unlink()
     n = 0
     for f in sorted(COMMANDS_SRC.glob("hfss-*.md")):
         shutil.copy2(f, dest_dir / f.name)
         n += 1
-    print(f"  [写] {dest_dir}  ({n} 个 /hfss-* 命令;目录内其它命令未动)")
+    msg = f"  [写] {dest_dir}  ({n} 个 /hfss-* 命令"
+    if stale:
+        msg += f";清掉 {len(stale)} 个已废弃的"
+    print(msg + ";目录内其它命令未动)")
 
 
 def install_skill_user():
