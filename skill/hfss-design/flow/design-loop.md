@@ -10,7 +10,7 @@
 2. **缩放**:用卡里的**闭式公式**(优先)或 **λ₀ 归一化常数**算到目标频率/基板的起手尺寸(尺寸 ∝ 1/f;换 εr 必须重算 εeff)。`set_variable` 落成变量再建几何。
 3. **搭建 + 求解**:按 §3.5 坐标层叠、§5 sheet 规则、`s-parameters.md` 求解流程建模并 `analyze`。
 4. **对标门**:从 `get_s_parameters` / `get_radiation_pattern` 取实测,调 **`check_design_targets`**(measured + targets)拿结构化判定。**这是闭环的客观终止条件,别靠眼估说"差不多达标"。**
-5. **不达标 → 定向调**:看 `check_design_targets` 的 `failed_metrics` + 卡的"起手→调匹配"(哪个自由度控哪个指标,通常**频率调辐射体尺寸、匹配调馈电位置**,解耦),对症选**控制变量**走 `tuning.md` 扫参 / `tuning.md` 优化,落最佳值后**重跑 `check_design_targets`**,直到 `all_pass` 或向用户说明卡在哪。
+5. **不达标 → 定向调**:看 `check_design_targets` 的 `failed_metrics` + 卡的"起手→调匹配"(哪个自由度控哪个指标,通常**频率调辐射体尺寸、匹配调馈电位置**,解耦),对症选**控制变量**,走 `tuning.md`(扫参 / 优化),落最佳值后**重跑 `check_design_targets`**,直到 `all_pass` 或向用户说明卡在哪。
    ⚠️ **选不出控制变量时**:`tuning.md` 灵敏度分析直接给出该动谁(便宜,比粗扫省);
    **扫了一轮方向不对、或根本不知道结构为什么不工作时**,→ `diagnose-current.md` 取电流分布看机理。
    两者分工:灵敏度回答"动哪个旋钮",电流分布回答"为什么不转"。

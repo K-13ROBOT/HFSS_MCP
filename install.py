@@ -159,9 +159,28 @@ def install_project(project_dir: str):
     print("\n完成。重启 Claude Code,/mcp 应看到 hfss-agent-native。")
 
 
+def _lint():
+    """分发前体检 skill 的跨文件引用。拆成多张流程卡之后这个靠人盯不住。"""
+    try:
+        import lint_skill
+    except Exception as e:
+        print(f"  [warn] 跳过 skill 体检: {type(e).__name__}: {e}")
+        return
+    bad = lint_skill.check(verbose=False)
+    if bad:
+        print(f"  [warn] skill 引用体检发现 {len(bad)} 处问题(照常安装,但建议先修):")
+        for x in bad[:10]:
+            print("         " + x)
+        if len(bad) > 10:
+            print(f"         ... 还有 {len(bad)-10} 处,跑 python lint_skill.py 看全部")
+    else:
+        print("  skill 引用体检:通过")
+
+
 def install_skill_user():
     home_skills = Path.home() / ".claude" / "skills"
     print(f"安装 skill 到用户级 {home_skills}:")
+    _lint()
     install_skill(home_skills)
     print("\n完成。MCP server 仍需用下面的 `claude mcp add` 命令注册(本脚本不动全局配置)。\n")
     print_instructions()
