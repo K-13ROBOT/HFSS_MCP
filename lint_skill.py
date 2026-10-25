@@ -126,6 +126,23 @@ def check(verbose=True):
                     _read(c) for c in glob.glob(os.path.join(cmd_dir, "hfss-*.md"))):
                 problems.append(f"[流程卡既不在路由表也不在命令里,没人会读到它] flow/{fn}")
 
+    # ⑦ 命令是不是生成物的最新版 —— 命令里的分支列表来自 SKILL.md 的路由表,
+    #    改了路由表却没重跑 make_commands.py,两份就对不上了。重新生成一遍比对。
+    try:
+        sys.path.insert(0, ROOT)
+        import make_commands
+        for name, want in make_commands.build().items():
+            f = os.path.join(ROOT, "commands", name)
+            if not os.path.exists(f):
+                problems.append(f"[命令缺失] commands/{name} —— 跑 python make_commands.py")
+            elif _read(f).replace("\r\n", "\n") != want.replace("\r\n", "\n"):
+                problems.append(f"[命令与 SKILL.md 路由表不同步] commands/{name}"
+                                f" —— 跑 python make_commands.py 重新生成")
+    except SystemExit as e:
+        problems.append(f"[命令生成器跑不动] {e}")
+    except Exception as e:
+        problems.append(f"[跳过命令同步检查] {type(e).__name__}: {e}")
+
     if verbose:
         if problems:
             print(f"skill 引用体检:{len(problems)} 处问题")
