@@ -48,7 +48,7 @@ MCP 工具是"手",skill 是"怎么正确用手"的纪律 —— 复现文献总
 ### 斜杠命令:两个入口
 
 skill 的路由靠 agent 自己判断任务性质,**命令给一个不靠判断的入口**。
-`install.py --skill-user` 把 `commands/hfss-*.md` 装到 `~/.claude/commands/`:
+`install.py --project` 把 `commands/hfss-*.md` 装到 `<项目>/.claude/commands/`(`--skill-user` 则装到 `~/.claude/commands/`):
 
 | 命令 | 用在什么时候 |
 |---|---|
@@ -150,12 +150,16 @@ python install.py
 python install.py --project D:\path\to\your\project
 ```
 
-一条命令写好三样(已存在则合并,不覆盖):
-- `<项目>\.mcp.json` ← MCP server 注册(项目级)
-- `<项目>\.claude\skills\hfss-design\` ← skill(含 knowledge/ 经验库 + design/ 设计卡片库)
+一条命令写好四样(已存在则合并,不覆盖):
+- `<项目>\.mcp.json` ← MCP server 注册(项目级;已有条目里自己加的 env 键、timeout 保留)
+- `<项目>\.claude\skills\` ← 三个 skill(含 knowledge/ 经验库 + design/ 设计卡片库)
+- `<项目>\.claude\commands\` ← `/hfss-*` 斜杠命令(只动 `hfss-*.md`)
 - `<项目>\.claude\settings.json` ← 给 `analyze` 加"执行前确认"(防误触阻塞操作)
 
 **方式 B — 全局(所有项目可用)**
+
+skill 和命令装到全局、MCP 却只在某个项目注册的话,别的项目里也能敲 `/hfss-*`,但调不到任何工具。
+两者要么都全局,要么都项目级。
 
 ```powershell
 python install.py --skill-user      # ① 把 skill 装到 ~/.claude/skills/

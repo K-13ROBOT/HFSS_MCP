@@ -7,8 +7,8 @@ ProgID 由注册表解析,不需要 ANSYSEM_ROOT 路径。
 
 用法:
   python install.py                  # 只打印 .mcp.json 块 + claude mcp add 命令,不动文件
-  python install.py --project DIR     # 把 .mcp.json / skill / settings 写进项目目录 DIR
-  python install.py --skill-user      # 把全部 skill 复制到 ~/.claude/skills/(全局)
+  python install.py --project DIR     # 把 .mcp.json / skill / 斜杠命令 / settings 写进项目目录 DIR
+  python install.py --skill-user      # 把全部 skill + 斜杠命令复制到 ~/.claude/(全局)
 
 绝不改全局 ~/.claude.json;用户级 MCP 注册用打印出来的 `claude mcp add` 命令。
 """
@@ -73,6 +73,20 @@ def print_instructions():
     print(f"\n  提示:env 当前 = {dict(entry['env'])}")
     print("  版本:默认连 HFSS_VERSION 那个版本;要连别的(如 2019.2)在对话里让 open_desktop 传 version='2019.2',")
     print("         或把 env 里的 HFSS_VERSION 改掉。")
+
+
+def _merged_entry(mcp_json: Path) -> dict:
+    """新的 server 条目,但保留已有条目里用户加的东西:env 里多出来的键(如 HFSS_PROJECTS_DIR)、
+    timeout 等其它字段。command/args 和推导出的 env 键以本次为准。"""
+    new = mcp_entry()
+    try:
+        old = json.loads(mcp_json.read_text(encoding="utf-8"))["mcpServers"][SERVER_NAME]
+    except Exception:
+        return new
+    merged = dict(old)
+    merged.update({k: v for k, v in new.items() if k != "env"})
+    merged["env"] = {**(old.get("env") or {}), **new["env"]}
+    return merged
 
 
 def _merge_json_file(path: Path, patch: dict, top_key: str, sub_key: str):
@@ -153,8 +167,11 @@ def install_project(project_dir: str):
     if not proj.is_dir():
         sys.exit(f"项目目录不存在: {proj}")
     print(f"写入项目 {proj}:")
-    _merge_json_file(proj / ".mcp.json", {"mcpServers": {SERVER_NAME: mcp_entry()}}, "mcpServers", SERVER_NAME)
+    _lint()
+    _merge_json_file(proj / ".mcp.json", {"mcpServers": {SERVER_NAME: _merged_entry(proj / ".mcp.json")}},
+                     "mcpServers", SERVER_NAME)
     install_skill(proj / ".claude" / "skills")
+    install_commands(proj / ".claude" / "commands")
     snippet = json.loads(SETTINGS_SNIPPET.read_text(encoding="utf-8"))
     _merge_json_file(proj / ".claude" / "settings.json", snippet, "permissions", "ask")
     print("\n完成。重启 Claude Code,/mcp 应看到 hfss-agent-native。")
@@ -213,8 +230,8 @@ def install_skill_user():
 def main():
     ap = argparse.ArgumentParser(description="注册 HFSS native MCP bundle 给 Claude Code")
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--project", metavar="DIR", help="把 .mcp.json/skill/settings 写进项目目录")
-    g.add_argument("--skill-user", action="store_true", help="把全部 skill 复制到 ~/.claude/skills/")
+    g.add_argument("--project", metavar="DIR", help="把 .mcp.json/skill/斜杠命令/settings 写进项目目录")
+    g.add_argument("--skill-user", action="store_true", help="把全部 skill + 斜杠命令复制到 ~/.claude/")
     args = ap.parse_args()
     if not SERVER.exists():
         sys.exit(f"找不到 {SERVER} —— install.py 必须和 hfss_mcp_server.py 同目录")
