@@ -63,6 +63,20 @@ def _clear(ctx):
         ctx[k] = None
     ctx["project_name"] = None
     ctx["design_name"] = None
+    ctx["foreign_projects"] = set()   # 连上时实例里已经开着的工程 —— 别人的,不许关
+    ctx["own_projects"] = set()       # 本会话 new_project / open_project 出来的
+
+
+def _snapshot_foreign(ctx, oDesktop):
+    """连上之后第一件事:记下实例里已经开着的工程。这些是别人的(用户自己的会话,
+    或别的 Claude 会话)——close_desktop 时绝不能连它们一起关。"""
+    try:
+        projs = [str(p) for p in (oDesktop.GetProjectList() or [])]
+    except Exception:
+        projs = []
+    ctx["foreign_projects"] = set(projs)
+    ctx["own_projects"] = set()
+    return projs
 
 
 def _alive(ctx):
@@ -108,7 +122,18 @@ def open_desktop(ctx, version=None):
         real_ver = oDesktop.GetVersion()
     except Exception:
         real_ver = version
-    return {"ok": True, "version": version, "aedt_version": real_ver}
+    # Dispatch 在 2025.2 上**不是新起实例,是接管已在运行的那个**(2019.2 不进 ROT,才每次新起)。
+    # 实测事故:另一个会话 Dispatch 接管实例、收尾 QuitApplication,把别人开着的工程关了,
+    # 未存的改动丢失。所以这里同样记下已开工程,close_desktop 据此拒绝退出。
+    projs = _snapshot_foreign(ctx, oDesktop)
+    out = {"ok": True, "version": version, "aedt_version": real_ver}
+    if projs:
+        out["attached_to_running_instance"] = True
+        out["projects_open"] = projs
+        out["warning"] = (f"没有新起实例,而是接管了已在运行的 AEDT —— 里面开着 {len(projs)} 个工程"
+                          f"({', '.join(projs)}),是别人的。**只在自己新建/打开的工程里干活;"
+                          "close_desktop 不会退出这个实例**,只会关掉你自己的工程。")
+    return out
 
 
 @tool({
@@ -128,22 +153,36 @@ def attach_desktop(ctx, version=None):
     if _alive(ctx):
         return {"ok": False, "error": "desktop 已连接且存活"}
     version = version or _DEFAULT_VERSION
+    # GetActiveObject 在 2025.2 上常拿不到(MK_E_UNAVAILABLE):实例在跑,但不在 ROT 里。
+    # 实测这时 Dispatch 能接上同一个实例。所以先试 GetActiveObject,失败退回 Dispatch。
+    # ⚠️ Dispatch 在 2025.2 上 = 接管已运行的实例(那个实例里可能开着别人的工程),
+    #    所以连上后必须记下已开工程,close_desktop 据此拒绝 QuitApplication。
+    via = "GetActiveObject"
     try:
         app = _wc.GetActiveObject(_progid(version))
         oDesktop = app.GetAppDesktop()
-    except Exception as e:
-        return {"ok": False, "error": f"连接运行中的 AEDT {version} 失败: {type(e).__name__}: {e}",
-                "hint": "确认 HFSS 已在运行;否则用 open_desktop 新启动"}
+    except Exception as e1:
+        try:
+            app = _wc.Dispatch(_progid(version))
+            oDesktop = app.GetAppDesktop()
+            via = "Dispatch(GetActiveObject 失败后退回)"
+        except Exception as e2:
+            return {"ok": False,
+                    "error": f"连接运行中的 AEDT {version} 失败。GetActiveObject: {type(e1).__name__}: {e1};"
+                             f" Dispatch: {type(e2).__name__}: {e2}",
+                    "hint": "确认 HFSS 已在运行、版本号对得上;否则用 open_desktop 新启动"}
     _clear(ctx)
     ctx["app"] = app
     ctx["oDesktop"] = oDesktop
     ctx["version"] = version
-    projs = []
-    try:
-        projs = list(oDesktop.GetProjectList() or [])
-    except Exception:
-        pass
-    return {"ok": True, "version": version, "projects_open": projs}
+    projs = _snapshot_foreign(ctx, oDesktop)
+    out = {"ok": True, "version": version, "connected_via": via, "projects_open": projs}
+    if projs:
+        out["warning"] = (f"这个实例里已经开着 {len(projs)} 个工程({', '.join(projs)})—— "
+                          "它们是别人的(用户自己的会话或别的 Claude 会话)。"
+                          "**只在自己新建/打开的工程里干活;close_desktop 不会退出这个实例**,"
+                          "只会关掉你自己的工程。")
+    return out
 
 
 @tool({
@@ -170,6 +209,7 @@ def new_project(ctx, name):
         return {"ok": False, "error": f"新建/保存工程失败: {type(e).__name__}: {e}"}
     ctx["oProject"] = oProject
     ctx["project_name"] = name
+    ctx.setdefault("own_projects", set()).add(name)
     ctx["oDesign"] = None
     ctx["oEditor"] = None
     ctx["design_name"] = None
@@ -231,6 +271,9 @@ def open_project(ctx, path, activate_design=None):
         pname = base
     ctx["oProject"] = oProject
     ctx["project_name"] = pname
+    # 打开的若本来就是别人开着的那个,仍算别人的(不加进 own)
+    if pname not in ctx.get("foreign_projects", set()):
+        ctx.setdefault("own_projects", set()).add(pname)
     ctx["oDesign"] = None
     ctx["oEditor"] = None
     ctx["design_name"] = None
@@ -501,6 +544,46 @@ def close_desktop(ctx, save=False):
     oDesktop = ctx.get("oDesktop")
     if oDesktop is None:
         return {"ok": False, "error": "当前没有 desktop"}
+    # ⚠️ 护栏:实例里只要还开着**不是本会话建/开的工程**,就绝不 QuitApplication。
+    #    open_desktop / attach_desktop 在 2025.2 上都可能是接管了别人的实例
+    #    (用户自己的会话、或别的 Claude 会话)。实测事故:别的会话 Dispatch 接管实例、
+    #    收尾 QuitApplication,把开着的工程关了,未存改动丢失。
+    #    这时只关自己的工程,实例留着。
+    own = set(ctx.get("own_projects") or ())
+    try:
+        current = [str(p) for p in (oDesktop.GetProjectList() or [])]
+    except Exception:
+        current = None
+    if current is None:
+        _clear(ctx)
+        return {"ok": False, "error": "读不到实例里开着哪些工程,**为安全起见没有退出 AEDT**(只清了本会话状态)",
+                "hint": "确认没有别人的工程开着,再让用户手工关"}
+    others = [p for p in current if p not in own]
+    if others:
+        closed, failed = [], {}
+        for p in current:
+            if p not in own:
+                continue
+            try:
+                proj = oDesktop.SetActiveProject(p)
+                if save:
+                    try:
+                        proj.Save()
+                    except Exception:
+                        pass
+                oDesktop.CloseProject(p)
+                closed.append(p)
+            except Exception as e:
+                failed[p] = f"{type(e).__name__}: {e}"
+        _clear(ctx)
+        out = {"ok": True, "quit_application": False,
+               "closed_own_projects": closed,
+               "left_open_not_ours": others,
+               "note": (f"实例里还开着 {len(others)} 个不是本会话的工程({', '.join(others)}),"
+                        "**没有退出 AEDT** —— 只关掉了本会话自己的工程。")}
+        if failed:
+            out["close_failed"] = failed
+        return out
     try:
         if save and ctx.get("oProject") is not None:
             try:
@@ -512,7 +595,7 @@ def close_desktop(ctx, save=False):
         _clear(ctx)
         return {"ok": False, "error": f"关闭 desktop 出错: {e},但状态已清空"}
     _clear(ctx)
-    return {"ok": True}
+    return {"ok": True, "quit_application": True}
 
 
 @tool({

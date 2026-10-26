@@ -43,6 +43,11 @@ def _to_unit_str(freq):
                 "frequency": {"type": "string", "description": "自适应频率,带单位(如 '2.4GHz')"},
                 "max_passes": {"type": "integer", "default": 10, "description": "最大自适应迭代,默认 10"},
                 "max_delta_s": {"type": "number", "default": 0.02, "description": "S 收敛阈值,默认 0.02"},
+                "min_converged_passes": {"type": "integer", "default": 1,
+                                         "description": "要求**连续几遍**满足 max_delta_s 才判收敛,默认 1。"
+                                                        "只要求 1 遍时,网格还粗、恰好两遍都没解对也会判收敛"
+                                                        "(实测:ΔS 0.03 + 1 遍,第 5 遍 39k 网格就判了收敛,是假的)。"
+                                                        "**做网格校准时用 2**;日常调参为了快可以留 1"},
                 "frequencies": {"type": "array", "items": {"type": "string"},
                                 "description": "可选:多频点自适应(如 ['1.52GHz','1.672GHz']),每点都用 max_delta_s 判收敛,"
                                                "此时 frequency 被忽略。双频/多频天线、尤其含窄带高Q 模时用它——"
@@ -52,7 +57,8 @@ def _to_unit_str(freq):
         },
     },
 })
-def create_setup(ctx, name, frequency, max_passes=10, max_delta_s=0.02, frequencies=None):
+def create_setup(ctx, name, frequency, max_passes=10, max_delta_s=0.02, frequencies=None,
+                 min_converged_passes=1):
     oDesign = ctx["oDesign"]
     if frequencies:
         # 键名照 AEDT 2025.2 录制脚本(Nuhertz Dual8Ports.py):频点表是 NAME: 嵌套数组,
@@ -71,7 +77,7 @@ def create_setup(ctx, name, frequency, max_passes=10, max_delta_s=0.02, frequenc
             ["NAME:" + name] + freq_args + [
              "MaximumPasses:=", int(max_passes),
              "MinimumPasses:=", 1,
-             "MinimumConvergedPasses:=", 1,
+             "MinimumConvergedPasses:=", int(min_converged_passes),
              "PercentRefinement:=", 30,
              "IsEnabled:=", True,
              "BasisOrder:=", 1,
@@ -881,6 +887,8 @@ def cleanup_solutions(ctx, scope="fields", variations=None, keep_mesh=False, con
                 "max_passes": {"type": "integer", "default": 6, "description": "最大自适应迭代,默认 6"},
                 "max_delta_freq_pct": {"type": "number", "default": 10,
                                        "description": "频率收敛判据(百分比),默认 10"},
+                "min_converged_passes": {"type": "integer", "default": 1,
+                                         "description": "要求连续几遍满足判据才判收敛,默认 1。校准/高 Q 结构用 2"},
                 "converge_on_real_freq": {"type": "boolean", "default": False,
                                           "description": "只按实部收敛(高 Q 结构用),默认 False"},
             },
@@ -889,7 +897,8 @@ def cleanup_solutions(ctx, scope="fields", variations=None, keep_mesh=False, con
     },
 })
 def create_eigenmode_setup(ctx, name, min_frequency, num_modes=1, max_passes=6,
-                           max_delta_freq_pct=10, converge_on_real_freq=False):
+                           max_delta_freq_pct=10, converge_on_real_freq=False,
+                           min_converged_passes=1):
     oDesign = ctx["oDesign"]
     try:
         oDesign.GetModule("AnalysisSetup").InsertSetup("HfssEigen",
@@ -900,7 +909,7 @@ def create_eigenmode_setup(ctx, name, min_frequency, num_modes=1, max_passes=6,
              "ConvergeOnRealFreq:=", bool(converge_on_real_freq),
              "MaximumPasses:=", int(max_passes),
              "MinimumPasses:=", 1,
-             "MinimumConvergedPasses:=", 1,
+             "MinimumConvergedPasses:=", int(min_converged_passes),
              "PercentRefinement:=", 30,
              "IsEnabled:=", True,
              # 不带 MeshLink 块:2025.2 录制里有(ImportMesh:=False 等于没用),但 **2019.2 上
@@ -1034,7 +1043,11 @@ def _parse_emconv(path):
 
     out = {"converged": (one("IsConverged") or "").strip().lower() == "true",
            "max_passes": one("MaxPasses", int),
-           "target": one("ConvTarget", float)}
+           "target": one("ConvTarget", float),
+           # 要求连续几遍满足判据 = setup 的 MinimumConvergedPasses(活属性里读不到它,
+           # 但收敛文件里记着这次求解**真正用的**值,比 setup 设置更可信)
+           "consec_passes_required": one("ConvTargetConsecPasses", int),
+           "consec_passes_achieved": one("ConvCurrentConsecPasses", int)}
     passes = {}
     for blk in re.split(r"\$begin 'QuantityValues'", txt)[1:]:
         m = re.search(r"PassNo=(\d+)", blk)
@@ -1071,37 +1084,129 @@ def _valid_solutions(ctx):
         return None
 
 
+def _setup_props(ctx, setup):
+    """setup 的**活**属性(内存里的,不是盘上 .aedt —— 复制 design 被重置成 5 GHz 这种事
+    在存盘前只存在于内存)。取不到返回 {}。"""
+    oD = ctx["oDesign"]
+    srv = f"AnalysisSetup:{setup}"
+    out = {}
+    try:
+        for p in oD.GetProperties("HfssTab", srv) or []:
+            try:
+                out[str(p)] = str(oD.GetPropertyValue("HfssTab", srv, str(p)))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return out
+
+
+def _num(x):
+    try:
+        return float(str(x).strip().rstrip("%"))
+    except (TypeError, ValueError):
+        return None
+
+
 def _convergence_check(ctx, t0, setup):
-    """analyze 跑完后调用。返回 (摘要 dict, 警告 list)。
-    只对确定的事下结论,其余只报数(理由见本段开头)。"""
+    """返回 (摘要 dict, 警告 list)。**只对确定的事下结论,其余只报数**(理由见本段开头)。
+    独立工具 get_convergence 也走这里 —— 脚本跑的求解,事后照样能查。"""
     import glob
     warns = []
-    # ① 这个 setup 有没有解 —— 用 HFSS 自己的有效解列表判,不用时间戳。
-    #    (注意它抓不到"解被作废",只能抓"根本没解过",见 _valid_solutions)
-    #    曾用"收敛文件比 analyze 开始得早 = 没产出新解"判,真机一试全误报:
-    #    design 已解好、没改过时 HFSS 直接复用现成解(实测 4 秒返回),收敛文件
-    #    自然不更新 —— "解是缓存的"和"没解出来"在时间戳上一模一样,分不开。
+    # ① 这个 setup 有没有解 —— HFSS 自己的有效解列表(抓不到"解被作废",见 _valid_solutions)
     valid = _valid_solutions(ctx)
     if valid is not None and not any(v.startswith(f"{setup} :") for v in valid):
-        warns.append(f"**analyze 返回了 ok,但 '{setup}' 根本没有解** —— 不要拿任何取数结果当真。"
+        warns.append(f"**'{setup}' 根本没有解** —— 不要拿任何取数结果当真。"
                      "调 get_messages 查原因(典型:解跑到了别的 design 上、求解器子进程起不来)。")
         return None, warns
+
+    props = _setup_props(ctx, setup)
+    summary = {"setup": setup}
+    # ② setup 的活值 —— 只报事实,不下结论。看一眼就知道频点对不对
+    #    (复制 design 会把多频点 setup 静默重置成单频 5 GHz,只有这里能当场看见)
+    # 驱动求解叫 Solution Freq / Delta S;本征模叫 Min Freq / Delta F(2019.2 + 2025.2 实测)
+    for k_out, k_in in (("solution_freq", "Solution Freq"), ("min_freq", "Min Freq"),
+                        ("num_modes", "Modes"), ("max_passes_set", "Passes"),
+                        ("delta_s_set", "Delta S"), ("delta_f_pct_set", "Delta F")):
+        if k_in in props:
+            summary[k_out] = props[k_in]
 
     d = _results_dir(ctx)
     files = glob.glob(os.path.join(d, "*.EMConvData")) if d else []
     if not files:
-        return None, warns          # 有解但读不到收敛文件:不报警,只是没摘要
-    newest = max(files, key=os.path.getmtime)
-    try:
-        c = _parse_emconv(newest)
-    except Exception:
-        return None, warns
-    c["reused_cached_solution"] = os.path.getmtime(newest) < t0 - 2   # 信息,不是警告
-    # ② 没收敛 —— HFSS 自己说的,零误报
+        return summary, warns
+    # ③ 收敛文件按 setup 匹配,不是取整个 design 里最新的那个
+    #    文件名里的 S<id> 是 HFSS 内部解 ID,和 setup 的 ID 对不上(实测 setup ID=0、文件是 S14),
+    #    所以不逆向命名规则,改用内容指纹:文件里的 MaxPasses / ConvTarget 必须等于 setup 的活值。
+    want_passes = _num(props.get("Passes"))
+    want_target = _num(props.get("Delta S", props.get("Delta F")))
+    parsed = []
+    for f in files:
+        try:
+            parsed.append((f, _parse_emconv(f)))
+        except Exception:
+            continue
+    if want_passes is not None and want_target is not None:
+        matched = [(f, c) for f, c in parsed
+                   if c.get("max_passes") == int(want_passes)
+                   and c.get("target") is not None and abs(c["target"] - want_target) < 1e-9]
+        how = "按 setup 设置(轮数上限 + 判据)匹配"
+    else:
+        matched, how = parsed, "读不到 setup 设置,退回取最新的收敛文件(可能张冠李戴)"
+    if not matched:
+        summary["convergence_file"] = "没有与这个 setup 设置对得上的收敛文件"
+        warns.append(f"结果目录里的收敛文件没有一个和 '{setup}' 的设置(轮数上限/判据)对得上 —— "
+                     "这个 setup 很可能还没在当前设置下解过;设置改过之后没重解也会这样。")
+        return summary, warns
+    f, c = max(matched, key=lambda fc: os.path.getmtime(fc[0]))
+    c["reused_cached_solution"] = os.path.getmtime(f) < t0 - 2      # 信息,不是警告
+    c["matched_by"] = how
+    # 同设置的 setup 不止一个时,指纹分不开 —— 如实说
+    others = {os.path.basename(x) for x, _ in matched} - {os.path.basename(f)}
+    if others:
+        c["ambiguous_with"] = sorted(others)
+    summary.update(c)
+    # ④ 唯一下结论的一条:HFSS 自己说没收敛
     if not c.get("converged"):
         q = (f"ΔS={c['final_delta_s']}" if "final_delta_s" in c
              else f"Δf={c.get('final_delta_freq_pct')}%")
         warns.append(f"**没有收敛**:跑满 {c.get('passes_run')} 轮仍未达到判据 {c.get('target')}"
-                     f"(末轮 {q})。**结果不可信,别拿它对标、别拿它调参** —— "
-                     "加大 max_passes 重解。")
-    return c, warns
+                     f"(末轮 {q})。**结果不可信,别拿它对标、别拿它调参** —— 加大 max_passes 重解。")
+    return summary, warns
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "get_convergence",
+        "description": (
+            "查某个 setup 的收敛事实:是否收敛、跑了几轮、末轮网格单元数、末轮 ΔS,"
+            "**要求连续几遍满足判据 / 实际连续满足了几遍**,以及 setup 当前的**自适应频率**。"
+            "analyze 的返回值里已经带着同样的东西;**这个工具是给\"不是用 analyze 解的\"情况用的** "
+            "—— 自己写脚本求解、或接手别人已经解好的工程,事后照样能查。"
+            "只对确定的事报警(没收敛 / 根本没解),其余只报数。"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "setup": {"type": "string", "description": "setup 名,不传用第一个"}}},
+    },
+})
+def get_convergence(ctx, setup=None):
+    import time
+    if setup is None:
+        setups = list(ctx["state"].setups.keys()) if ctx.get("state") else []
+        if not setups:
+            try:
+                setups = [str(x) for x in ctx["oDesign"].GetModule("AnalysisSetup").GetSetups()]
+            except Exception:
+                setups = []
+        if not setups:
+            return {"ok": False, "error": "这个 design 里没有 setup"}
+        setup = setups[0]
+    summary, warns = _convergence_check(ctx, time.time() + 10 ** 9, setup)  # 事后查询:不判缓存
+    out = {"ok": True, "setup": setup}
+    if summary:
+        summary.pop("reused_cached_solution", None)
+        out["convergence"] = summary
+    if warns:
+        out["warnings"] = warns
+    return out

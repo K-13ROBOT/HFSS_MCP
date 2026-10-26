@@ -264,11 +264,18 @@ C4 结构的 S 矩阵是循环阵,按顺序相位馈电时**四个口的 ActiveS
 - 通用判据:怀疑某个 design 到底解没解,看 `.aedtresults/<design>.results` 的**目录大小**
   —— 几 KB = 没解,几 MB 才是真有解和场。这个判据不依赖任何 API。
 
-## `attach_desktop` 连不上用 Dispatch 启动的 AEDT
+## `attach_desktop` 连不上运行中的 AEDT(已在工具里兜住),以及**退出实例会毁别人的工作**
 - 现象:`GetActiveObject` 报 `MK_E_UNAVAILABLE`(操作无法使用),但 `ansysedt.exe` 明明在跑。
-- 原因:COM Dispatch 启动的 AEDT 没把自己注册进运行对象表(ROT)。
-- 解法:用 `open_desktop`(走 `Dispatch`),它会接上已有实例,不会重复启动。
-
+  实例在跑却不在运行对象表(ROT)里;这时 `Dispatch` 能接上同一个实例。
+- 工具已兜底:`attach_desktop` 先试 `GetActiveObject`,失败**自动退回 `Dispatch`**,
+  返回里 `connected_via` 写明走了哪条。**不用再改走自己的脚本** —— 走脚本的话,
+  `analyze` 返回值里的收敛体检就一条都不起作用(实测吃过这个亏:全程脚本求解,工具层检查全部失效)。
+- ⚠️ **更要紧的是另一面:`Dispatch` 在 2025.2 上不是新起实例,是接管已在运行的那个**
+  (2019.2 不进 ROT,才每次新起)。那个实例里可能开着用户自己的工程、或别的 Claude 会话的工程。
+  实测事故:另一个会话 Dispatch 接管实例、收尾 `QuitApplication`,把开着的工程关了,未存改动丢失。
+- 工具已护栏:`open_desktop`/`attach_desktop` 连上时记下已开的工程;`close_desktop`
+  **只要实例里还开着不是本会话建/开的工程,就绝不退出 AEDT**,只关自己的工程。
+  **自己写脚本时要守同一条**:连上先 `GetProjectList()`,非空就绝不 `QuitApplication`。
 ## 取远场前先确认 setup 的自适应频率落在谐振点上,否则 realized gain 是失配假象
 - 现象:同一个天线,改了介质加载后重跑,`get_radiation_pattern` 的峰值增益从 +4.0 dBi 掉到 **−5.6 dBi**,
   方向图也不再是预期形状(峰值跑偏、单调下降)。看着像天线被改坏了。

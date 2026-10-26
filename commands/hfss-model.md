@@ -10,7 +10,7 @@
 - 给的是**目标/规格**不是现成尺寸 → `flow/design-loop.md`
   ⚠️ 先对标再调、调完再对标,别靠眼估说"差不多达标"
 - 跑 S 参数 / 完整求解一个设计 → `flow/s-parameters.md`
-  ⚠️ **顺序敏感**;求解前 bbox + validate 两道自检不许跳
+  ⚠️ **顺序敏感**;求解前 bbox + validate 两道自检不许跳;**自己写脚本求解的,事后调 `get_convergence` 补查收敛**(不补等于工具层检查全部失效)
 - 取远场(增益/轴比/HPBW/前后比) → `flow/farfield.md`
   ⚠️ **无穷远球面必须在 `create_setup` 之前建**(事后补要重解);**多端口必须先 `set_port_excitation` 设幅相**,否则算的是同相馈电
 - 非标准馈电(缝隙/近耦合/CPW/差分/多层) → `flow/feeding.md`

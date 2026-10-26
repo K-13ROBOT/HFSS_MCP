@@ -22,7 +22,7 @@ description: >-
 | **开工第一件事**(任何天线任务) | [`flow/capture-learning.md`](flow/capture-learning.md) | 不读经验库 = 每次从零踩坑 |
 | 照论文尺寸复现 | [`flow/reproduce-paper.md`](flow/reproduce-paper.md) | **尺寸只从参数表/正文抽,绝不在图上量**;拓扑有歧义先让用户确认 |
 | 给的是**目标/规格**不是现成尺寸 | [`flow/design-loop.md`](flow/design-loop.md) | 先对标再调、调完再对标,别靠眼估说"差不多达标" |
-| 跑 S 参数 / 完整求解一个设计 | [`flow/s-parameters.md`](flow/s-parameters.md) | **顺序敏感**;求解前 bbox + validate 两道自检不许跳 |
+| 跑 S 参数 / 完整求解一个设计 | [`flow/s-parameters.md`](flow/s-parameters.md) | **顺序敏感**;求解前 bbox + validate 两道自检不许跳;**自己写脚本求解的,事后调 `get_convergence` 补查收敛**(不补等于工具层检查全部失效) |
 | 取远场(增益/轴比/HPBW/前后比) | [`flow/farfield.md`](flow/farfield.md) | **无穷远球面必须在 `create_setup` 之前建**(事后补要重解);**多端口必须先 `set_port_excitation` 设幅相**,否则算的是同相馈电 |
 | 非标准馈电(缝隙/近耦合/CPW/差分/多层) | [`flow/feeding.md`](flow/feeding.md) | **端口 sheet 绝不赋 PE**;积分线方向上要有非零跨度 |
 | 指标不达标要调(扫参/灵敏度/公差/优化) | [`flow/tuning.md`](flow/tuning.md) | **调参前先用更严的网格校准一次**(偏移<1% 才算网格够用,否则调出来的全是假的);**多谐振结构第一次不达标就先看电流** |
