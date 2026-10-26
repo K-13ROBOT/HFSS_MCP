@@ -137,10 +137,36 @@ def run_parametric_sweep(ctx, name):
     except Exception as e:
         return {"ok": False, "error": f"参扫求解失败: {type(e).__name__}: {e}",
                 "elapsed_sec": round(time.time() - t0, 1)}
+    out = {"ok": True, "name": name, "elapsed_sec": round(time.time() - t0, 1)}
+    # SolveSetup 失败时 COM 不报错(典型:参扫指向的 setup 被删了再同名重建 —— 参扫按 ID 引用,
+    # 消息窗口写 "Need to include at least one simulation setup",返回照样成功)。逐组查收敛表才知道解没解。
     state = ctx.get("state")
-    if state is not None and hasattr(state, "parametrics") and name in state.parametrics:
-        state.parametrics[name]["solved"] = True
-    return {"ok": True, "name": name, "elapsed_sec": round(time.time() - t0, 1)}
+    info = state.parametrics.get(name) if state is not None and hasattr(state, "parametrics") else None
+    if not info:
+        out["note"] = "本会话没有这个参扫的取值记录(重开工程后常见),没法逐组核对是否真的解了"
+        return out
+    import itertools
+    from .analysis import _export_convergence
+    vs = info["variables"]
+    unsolved = []
+    for combo in itertools.product(*[v["values"] for v in vs]):
+        var = " ".join(f"{v['name']}='{x}'" for v, x in zip(vs, combo))
+        c = _export_convergence(ctx, info["setup"], var)
+        if c is not None and not c.get("has_solution"):
+            unsolved.append(var)
+    n = 1
+    for v in vs:
+        n *= len(v["values"])
+    if unsolved and len(unsolved) == n:
+        return {"ok": False, "name": name, "elapsed_sec": out["elapsed_sec"],
+                "error": f"参扫 '{name}' 返回了,但 {n} 组变量**一组都没有解**",
+                "hint": ("读 get_messages。典型:它指向的 setup 被 delete_setup 后同名重建过 —— "
+                         "参扫按 ID 引用 setup,接不上了,要新建一个参扫")}
+    info["solved"] = True
+    if unsolved:
+        out["unsolved_variations"] = unsolved
+        out["warning"] = f"{len(unsolved)}/{n} 组没有解,取结果时这些组会缺;读 get_messages 查原因"
+    return out
 
 
 # ────────────────────────── 结果提取 ──────────────────────────

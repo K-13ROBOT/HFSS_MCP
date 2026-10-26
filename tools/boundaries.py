@@ -277,7 +277,8 @@ def create_infinite_sphere(ctx, name="Sphere1", theta_start="0deg", theta_stop="
         except Exception as e:
             last = f"{meth}: {type(e).__name__}: {e}"
     if last:
-        return {"ok": False, "error": f"插入远场球失败({last})"}
+        return {"ok": False, "error": f"插入远场球失败({last})",
+                "hint": "还没有辐射边界时必失败(2019.2 实测),先 create_open_region"}
     if "state" in ctx:
         ctx["state"].boundaries[f"InfSphere_{name}"] = {"type": "InfiniteSphere", "name": name}
     return {"ok": True, "name": name,

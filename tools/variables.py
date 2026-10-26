@@ -42,7 +42,8 @@ def set_variable(ctx, name, expression):
               ["NAME:PropServers", "LocalVariables"],
               changed]])
     except Exception as e:
-        return {"ok": False, "error": f"设变量失败: {type(e).__name__}: {e}"}
+        return {"ok": False, "error": f"设变量失败: {type(e).__name__}: {e}",
+                "hint": "名字和内置常量/单位冲突时只报'发生意外'(实测 R、Pi 都建不了),换个名字如 Rh、Pit"}
     if "state" in ctx:
         ctx["state"].variables[name] = str(expression)
     return {"ok": True, "name": name, "expression": str(expression), "updated": exists}

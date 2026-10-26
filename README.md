@@ -245,10 +245,16 @@ skill/hfss-stackup/               PCB 叠层还原 skill
 | 扫频存远场 | — | **单设 `SaveRadFields` 不生效** | 取 AR/增益 vs 频率要 `Discrete` + `save_fields=True` |
 | 本征模 setup 的 `MeshLink` 块 | **出现就要求 partner project 名**,否则报"The partner project name cannot be empty" | 可带可不带(`ImportMesh:=False` 时无作用)| 一律不发这个块 |
 
-另有两条与版本无关、但同样反直觉:
+另有几条与版本无关、但同样反直觉:
 
 - **`CreateRectangle` 的 XZ 平面 Width/Height 轴向与直觉相反**(WhichAxis=Y 时 Width→Z、Height→X),已在 `create_rectangle` 内修正。
 - **端口积分线不能直接放变量名**(老版本会崩),工具会自动解析成字面量(同轴端口除外,要求本来就传字面量)。
+- **AEDT 对不认识的参数键静默忽略**:键名写错不报"未知参数",而是按缺省处理,报错指向别处
+  (如 `Mirror` 把 `MirrorNormalX` 写成 `MirrorNormalVecX` → 报"向量非法"),甚至返回成功、存进去的全是默认值
+  (多频自适应用键值对而不是 `NAME:` 嵌套写法)。新写 COM 调用后 `save_project`,grep `.aedt` 里对应的块核对;
+  要抄脚本写法,去 AEDT 安装目录搜录制脚本(`.aedt` 的存盘格式和脚本格式不一样,只能用来核对)。
+- **`GetValidISolutionList` 不能用来判"有没有解"**:没解过的 setup 它也列着(2019.2 实测),
+  解被作废后也照样列着。工具一律用 `ExportConvergence` 的收敛表判断。
 
 ## 其它已知点
 

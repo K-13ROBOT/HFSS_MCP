@@ -151,7 +151,9 @@ def create_sweep(ctx, setup, name, start_frequency, stop_frequency, num_points=4
              "InterpMinSubranges:=", 1,
              "ExtrapToDC:=", False])
     except Exception as e:
-        return {"ok": False, "error": f"InsertFrequencySweep 失败: {type(e).__name__}: {e}"}
+        return {"ok": False, "error": f"InsertFrequencySweep 失败: {type(e).__name__}: {e}",
+                "hint": ("设计里还没有端口时插值扫频必失败(2019.2 实测):先建端口再建扫频,"
+                         "纯叠层这类无端口设计用 sweep_type='Discrete' + save_fields=True。同名扫频也会失败")}
     if "state" in ctx:
         ctx["state"].setups.setdefault(setup, {}).setdefault("sweeps", []).append(
             # save_fields / sweep_type 必须记进 state:下游取场的工具(get_current_along_path、
@@ -334,12 +336,8 @@ def analyze(ctx, setup=None):
         return err
     print(f"  [Solving] {setup} ...")
     # 求解前先导一份收敛表:求解后若与之一字不差,说明 HFSS 复用了缓存解、没重算。
-    # 从没解过的 setup 不导 —— 对没解的 setup 导收敛表会在消息窗口留一条假 [error]
-    valid = _valid_solutions(ctx)
-    if valid is not None and not any(v.startswith(f"{setup} :") for v in valid):
-        before = {"has_solution": False}
-    else:
-        before = _export_convergence(ctx, setup)
+    # (对没解过的 setup 导,只得到 Completed: N/A,不会在消息窗口留 error —— 2019.2 实测)
+    before = _export_convergence(ctx, setup)
     t0 = time.time()
     try:
         oDesign.Analyze(setup)   # 阻塞;COM 自动化同步返回
@@ -1018,16 +1016,6 @@ def get_eigenmodes(ctx, setup=None, sweep="LastAdaptive", path=None):
 # ─────────────────────────────────────────────────────────
 
 
-def _valid_solutions(ctx):
-    """当前 design 的有效解列表。取不到返回 None。
-    ⚠️ 实测(2025.2):**解被作废后它照样列着** —— 它反映的是"盘上有没有这个 setup 的解",
-    不是"解对当前几何是否还有效"。只用来抓"这个 setup 根本没解过"。"""
-    try:
-        return [str(x) for x in ctx["oDesign"].GetModule("Solutions").GetValidISolutionList()]
-    except Exception:
-        return None
-
-
 def _setup_props(ctx, setup):
     """setup 的**活**属性(内存里的,不是盘上 .aedt —— 复制 design 被重置成 5 GHz 这种事
     在存盘前只存在于内存)。取不到返回 {}。"""
@@ -1057,15 +1045,16 @@ def _nums(x):
     return out
 
 
-def _export_convergence(ctx, setup):
-    """当前这组设计变量的收敛表 → dict。导不出返回 None。"""
+def _export_convergence(ctx, setup, variation=""):
+    """某组设计变量的收敛表 → dict。导不出返回 None。
+    variation 为空 = 当前这组;也可以只写被扫的变量(如 "L='22mm'"),其余按 nominal 补齐。"""
     import tempfile
     oD = ctx["oDesign"]
     path = os.path.join(tempfile.gettempdir(), f"_hfss_conv_{os.getpid()}_{setup}.txt")
     try:
         if os.path.exists(path):
             os.remove(path)
-        oD.ExportConvergence(setup, "", path, True)
+        oD.ExportConvergence(setup, variation, path, True)
         txt = io.open(path, encoding="utf-8", errors="replace").read()
     except Exception:
         return None
@@ -1118,13 +1107,9 @@ def _export_convergence(ctx, setup):
 
 def _convergence_check(ctx, setup, before=None):
     """返回 (摘要 dict, 警告 list)。before = analyze 之前导出的那份(判是否复用了缓存解)。"""
+    # 不用 GetValidISolutionList 判"有没有解":2019.2 上没解过的 setup 它也列着,
+    # 解被作废后它也照样列着。收敛表的 has_solution 才可靠。
     warns = []
-    valid = _valid_solutions(ctx)
-    if valid is not None and not any(v.startswith(f"{setup} :") for v in valid):
-        warns.append(f"**'{setup}' 根本没有解** —— 不要拿任何取数结果当真。"
-                     "调 get_messages 查原因(典型:解跑到了别的 design 上、求解器子进程起不来)。")
-        return None, warns
-
     props = _setup_props(ctx, setup)
     summary = {"setup": setup}
     # setup 的活值 —— 只报事实。看一眼就知道频点对不对、是不是被重置成了单频
@@ -1152,7 +1137,8 @@ def _convergence_check(ctx, setup, before=None):
     if not c.get("has_solution"):
         warns.append("**当前这组设计变量没有可用的解**(收敛表是空的)—— 典型是求解后又改过几何"
                      "(**画采样线没加 non_model=True 也算**),解被作废了;或者这组变量还没解过。"
-                     "不要拿任何取数结果当真,重新 analyze。")
+                     "不要拿任何取数结果当真。刚 analyze 完就是这样的话,读 get_messages 查原因"
+                     "(典型:求解器子进程起不来);否则重新 analyze。")
     elif c.get("converged") is False:
         warns.append(f"**没有收敛**:跑了 {c.get('passes_completed')}/{c.get('passes_max')} 轮,"
                      f"判据 {c.get('criterion')} 目标 {c.get('target')}、末轮 {c.get('final_value')}。"

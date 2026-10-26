@@ -122,7 +122,7 @@ for r in ws.iter_rows(max_row=ws.max_row,max_col=ws.max_column):
 ## 6. 建模(hfss-agent MCP)
 
 ### 6.1 会话
-`open_desktop` → `new_project` → **`new_design`**(别漏 `new_design`,见 `_general.md`)。
+`open_desktop` → `new_project` → **`new_design`**(别漏:没有 design 时建模工具一律报"无 active design")。
 叠层做信号完整性一般用 `solution_type='Terminal'`。
 
 ### 6.2 全参数化 —— 几何里不许出现任何字面量数字
@@ -209,7 +209,7 @@ size     = ['board_w',    'board_l',    't_pp_L2_L3']
 ## 8. Setup / 扫频:纯叠层没有端口
 
 `create_setup` 正常;扫频必须 `sweep_type='Discrete'` + `save_fields=True`
-——原因见 `_general.md`「无端口设计的扫频」。点数别贪多(存场很占盘),20 来个点够。
+——没有端口时插值扫频建不出来(`InsertFrequencySweep` 报"发生意外")。点数别贪多(存场很占盘),20 来个点够。
 
 > 端口/激励要等有了实际结构(走线、过孔、差分对)才加。**只有叠层时不要硬塞端口**,
 > 也不要跑 `analyze` —— 没激励算不出有意义的东西。这时 `validate_design` 报缺激励是正常的。

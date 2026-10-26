@@ -24,7 +24,12 @@ def _assign_lumped(oDesign, name, sheet, int_start, int_end, impedance):
              "ShowReporterFilter:=", False, "ReporterFilter:=", [True], "Impedance:=", zstr])
         return True, None
     except Exception as e:
-        return False, f"AssignLumpedPort 失败: {type(e).__name__}: {e}"
+        err = f"AssignLumpedPort 失败: {type(e).__name__}: {e}"
+        bad = [c for c in list(int_start) + list(int_end) if _to_mm(c) is None]
+        if bad:   # 2019.2 实测:积分线里有表达式(如 'H/2*2')就报"发生意外"
+            err += (f"。积分线坐标 {bad} 没能解析成字面量 —— 只支持字面量、裸变量名、取负的裸变量,"
+                    "表达式请算好写成字面量")
+        return False, err
 
 
 @tool({
@@ -66,7 +71,7 @@ def create_lumped_port(ctx, name, sheet, int_start, int_end, impedance=50):
         "name": "create_edge_feed_port",
         "description": ("边缘/侧馈端口一步搞定:在 (feed_x,feed_y) 处建一个从 z_bottom 到 z_top 的竖直矩形 sheet,"
                         "再赋 lumped port(积分线沿 +Z)。你不用手动建 sheet。"
-                        "feed_x/feed_y/z_bottom/z_top 可用变量名(如 'subH')或字面量带单位,工具自动把变量解析成字面量喂积分线;复杂表达式拿不准就写字面量数值。"),
+                        "feed_x/feed_y/z_bottom/z_top 可用字面量带单位、裸变量名(如 'subH')或取负的裸变量(如 '-Lf'),工具自动解析成字面量喂积分线;**表达式(如 'H/2')不行**,算好写字面量。端口赋失败时 sheet 会自动删掉,可直接重试。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -106,6 +111,11 @@ def create_edge_feed_port(ctx, name, feed_x, feed_y, z_bottom, z_top, feed_width
     ok, err = _assign_lumped(ctx["oDesign"], name, sheet,
                              [feed_x, feed_y, z_bottom], [feed_x, feed_y, z_top], impedance)
     if not ok:
+        # sheet 已经建出来了,不删就成了孤儿:重试会再建一个 *_sheet_1,分不清端口挂在哪个上
+        try:
+            oEditor.Delete(["NAME:Selections", "Selections:=", sheet])
+        except Exception:
+            pass
         return {"ok": False, "error": err}
     if "state" in ctx:
         ctx["state"].objects[sheet] = {"type": "rectangle", "role": "edge_feed_port_sheet"}
@@ -133,6 +143,11 @@ def _resolve_coord(oDesign, s):
     '1.6mm' 这种;复杂表达式解析不了就原样返回(best-effort,老版本可能仍崩 → skill 提示拿不准写字面量)。"""
     s = str(s).strip()
     if _to_mm(s) is not None:                 # 已是 '1.6mm'/'-0.5mm'/'5' 字面量
+        return s
+    if s.startswith("-") and _re.match(r"^-\s*[A-Za-z_]\w*$", s):   # 取负的裸变量 '-Lf'
+        v = _resolve_coord(oDesign, s[1:].strip())
+        if _to_mm(v) is not None:
+            return v[1:] if v.startswith("-") else "-" + v
         return s
     try:
         v = oDesign.GetVariableValue(s)        # 裸变量名(如 'subH')→ 其值字符串
