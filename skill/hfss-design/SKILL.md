@@ -25,7 +25,7 @@ description: >-
 | 跑 S 参数 / 完整求解一个设计 | [`flow/s-parameters.md`](flow/s-parameters.md) | **顺序敏感**;求解前 bbox + validate 两道自检不许跳 |
 | 取远场(增益/轴比/HPBW/前后比) | [`flow/farfield.md`](flow/farfield.md) | **无穷远球面必须在 `create_setup` 之前建**(事后补要重解);**多端口必须先 `set_port_excitation` 设幅相**,否则算的是同相馈电 |
 | 非标准馈电(缝隙/近耦合/CPW/差分/多层) | [`flow/feeding.md`](flow/feeding.md) | **端口 sheet 绝不赋 PE**;积分线方向上要有非零跨度 |
-| 指标不达标要调(扫参/灵敏度/公差/优化) | [`flow/tuning.md`](flow/tuning.md) | **先问该动哪个变量再扫**;公差分析等达标之后再做 |
+| 指标不达标要调(扫参/灵敏度/公差/优化) | [`flow/tuning.md`](flow/tuning.md) | **调参前先用更严的网格校准一次**(偏移<1% 才算网格够用,否则调出来的全是假的);**多谐振结构第一次不达标就先看电流** |
 | 指标不对但**不知道为什么** | [`flow/diagnose-current.md`](flow/diagnose-current.md) | **采样线必须在 `analyze` 之前画好**(求解后画会让解作废且无提示);线要避开馈电点 |
 | 腔体/滤波器/DRA,要谐振频率与 Q | [`flow/eigenmode.md`](flow/eigenmode.md) | **design 必须建成 Eigenmode 类型**,不要端口;Q=0 是无耗不是出错 |
 | 无限阵 / FSS / 超表面单元 | [`flow/periodic.md`](flow/periodic.md) | **不要 `create_open_region`**,那是孤立天线的边界 |

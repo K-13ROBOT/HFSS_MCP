@@ -336,7 +336,14 @@ def analyze(ctx, setup=None):
                 "elapsed_sec": round(time.time() - t0, 1)}
     if "state" in ctx:
         ctx["state"].setups.setdefault(setup, {})["solved"] = True
-    return {"ok": True, "setup": setup, "elapsed_sec": round(time.time() - t0, 1)}
+    out = {"ok": True, "setup": setup, "elapsed_sec": round(time.time() - t0, 1)}
+    # 收敛体检:文档里写着要查的事,直接放进返回值 —— 返回值 agent 一定会看到
+    conv, warns = _convergence_check(ctx, t0, setup)
+    if conv:
+        out["convergence"] = conv
+    if warns:
+        out["warnings"] = warns
+    return out
 
 
 @tool({
@@ -982,3 +989,119 @@ def get_eigenmodes(ctx, setup=None, sweep="LastAdaptive", path=None):
         out["note_degenerate"] = (f"有 {len(near)} 处相邻模间隔 <1%,基本是简并模 —— "
                                   "做单模器件要确认馈电不会把另一个一起激发。")
     return out
+
+
+# ─────────────────────────────────────────────────────────
+# 收敛体检 —— 把"文档里写着要查"的事做进 analyze 的返回值
+# 文档是可选读物,工具返回是强制读物:agent 一定会看到 analyze 返回了什么。
+# 数据来自 <design>.results/*.EMConvData(纯文本,不碰 COM;试过 ExportConvergence /
+# GetConvergenceData 等 5 个 COM 方法名,2025.2 上都不存在)。
+#
+# **只对确定的事下结论**,其余只报数。曾经按"轮数≤3 / 单元<2万"判"可能假收敛",
+# 拿真文件一试:两个与解析解偏差 <0.02% 的腔体全被标了 —— 会喊狼来了的检查比没有更坏,
+# agent 被假警报烫几次就学会忽略整条返回,真出事时也一起忽略。网格到底够不够,
+# 正确的判法是 flow/tuning.md 的网格校准(换更严的网格对比),不是一个拍脑袋的阈值。
+# ─────────────────────────────────────────────────────────
+
+
+def _results_dir(ctx):
+    """<工程目录>/<工程名>.aedtresults/<design>.results;取不到返回 None"""
+    try:
+        oProject = ctx.get("oProject") or ctx["oDesign"].GetProject()
+        name = oProject.GetName()
+        path = oProject.GetPath()
+        design = ctx["oDesign"].GetName()
+        if ";" in design:                       # 有的版本返回 "proj;design"
+            design = design.split(";")[-1]
+        d = os.path.join(path, f"{name}.aedtresults", f"{design}.results")
+        return d if os.path.isdir(d) else None
+    except Exception:
+        return None
+
+
+def _parse_emconv(path):
+    """*.EMConvData → 收敛摘要。驱动求解看 MaxMagDeltaS,本征模看 MaxDeltaFreq(%)。"""
+    import re
+    import io as _io
+    txt = _io.open(path, encoding="utf-8", errors="replace").read().replace("\x00", "")
+
+    def one(key, cast=str):
+        m = re.search(rf"{key}='?([^'\n\r]+?)'?\s*$", txt, re.M)
+        try:
+            return cast(m.group(1)) if m else None
+        except ValueError:
+            return None
+
+    out = {"converged": (one("IsConverged") or "").strip().lower() == "true",
+           "max_passes": one("MaxPasses", int),
+           "target": one("ConvTarget", float)}
+    passes = {}
+    for blk in re.split(r"\$begin 'QuantityValues'", txt)[1:]:
+        m = re.search(r"PassNo=(\d+)", blk)
+        if not m:
+            continue
+        rec = passes.setdefault(int(m.group(1)), {})
+        e = re.search(r"SolvedElements\(([-\d.eE+]+)", blk)
+        if e:
+            rec["elements"] = int(float(e.group(1)))
+        for key, label in (("MaxMagDeltaS", "delta_s"), ("MaxDeltaFreq", "delta_freq_pct")):
+            d = re.search(rf"{key}\(([-\d.eE+]+)", blk)
+            if d:
+                rec[label] = float(d.group(1))
+    if passes:
+        last = max(passes)
+        out["passes_run"] = last
+        out["elements"] = passes[last].get("elements")
+        for k in ("delta_s", "delta_freq_pct"):
+            if k in passes[last]:
+                out["final_" + k] = round(passes[last][k], 6)
+        out["elements_by_pass"] = [passes[p].get("elements") for p in sorted(passes)]
+    return out
+
+
+def _valid_solutions(ctx):
+    """当前 design 的有效解列表。取不到返回 None。
+    ⚠️ 实测(2025.2):**解被作废后它照样列着** —— 求解后加一根线,前后列表一字不差。
+    它反映的是"盘上有没有这个 setup 的解",**不是**"解对当前几何是否还有效"。
+    所以它只能抓"这个 setup 根本没解过/解跑到别的 design 上"这一类;
+    作废要靠取数工具自己发现(取不到数据时报错会点名作废,见 fields.py)。"""
+    try:
+        return [str(x) for x in ctx["oDesign"].GetModule("Solutions").GetValidISolutionList()]
+    except Exception:
+        return None
+
+
+def _convergence_check(ctx, t0, setup):
+    """analyze 跑完后调用。返回 (摘要 dict, 警告 list)。
+    只对确定的事下结论,其余只报数(理由见本段开头)。"""
+    import glob
+    warns = []
+    # ① 这个 setup 有没有解 —— 用 HFSS 自己的有效解列表判,不用时间戳。
+    #    (注意它抓不到"解被作废",只能抓"根本没解过",见 _valid_solutions)
+    #    曾用"收敛文件比 analyze 开始得早 = 没产出新解"判,真机一试全误报:
+    #    design 已解好、没改过时 HFSS 直接复用现成解(实测 4 秒返回),收敛文件
+    #    自然不更新 —— "解是缓存的"和"没解出来"在时间戳上一模一样,分不开。
+    valid = _valid_solutions(ctx)
+    if valid is not None and not any(v.startswith(f"{setup} :") for v in valid):
+        warns.append(f"**analyze 返回了 ok,但 '{setup}' 根本没有解** —— 不要拿任何取数结果当真。"
+                     "调 get_messages 查原因(典型:解跑到了别的 design 上、求解器子进程起不来)。")
+        return None, warns
+
+    d = _results_dir(ctx)
+    files = glob.glob(os.path.join(d, "*.EMConvData")) if d else []
+    if not files:
+        return None, warns          # 有解但读不到收敛文件:不报警,只是没摘要
+    newest = max(files, key=os.path.getmtime)
+    try:
+        c = _parse_emconv(newest)
+    except Exception:
+        return None, warns
+    c["reused_cached_solution"] = os.path.getmtime(newest) < t0 - 2   # 信息,不是警告
+    # ② 没收敛 —— HFSS 自己说的,零误报
+    if not c.get("converged"):
+        q = (f"ΔS={c['final_delta_s']}" if "final_delta_s" in c
+             else f"Δf={c.get('final_delta_freq_pct')}%")
+        warns.append(f"**没有收敛**:跑满 {c.get('passes_run')} 轮仍未达到判据 {c.get('target')}"
+                     f"(末轮 {q})。**结果不可信,别拿它对标、别拿它调参** —— "
+                     "加大 max_passes 重解。")
+    return c, warns

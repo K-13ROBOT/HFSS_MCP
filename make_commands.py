@@ -85,8 +85,9 @@ TUNE = """# HFSS 优化:指标不达标,去调
    以及"一轮"怎么数、未达标项怎么列。照它执行,本命令不复述。**
 2. `~/.claude/skills/hfss-design/flow/tuning.md` —— 调参流程卡。
 
-**顺序别搞反**(细节在卡里):先用灵敏度问"该动哪个变量",再扫参;
-达标之后、投板之前才做公差与良率(调参过程中做是白做,设计还在变)。
+⚠️ {tune_rule}
+
+步骤顺序、每步的判据和代价都在流程卡里,**本命令不复述**(复述了就会和卡漂移)。
 
 调不动、或根本不知道为什么不工作 → 按核心约定里的退出条件转
 `flow/diagnose-current.md` 看机理。
@@ -99,10 +100,20 @@ $ARGUMENTS
 """
 
 
+def tune_rule():
+    """调参命令里那条"就算不读卡也要记住"的铁律,取自路由表调参那行的第三列。
+    曾在命令里手写"顺序别搞反:先灵敏度再扫参……",卡里加了第零步网格校准之后
+    它立刻就对不上了——所以改成和建模命令一样从路由表生成。"""
+    for task, dest, rule in routing_rows():
+        if "不达标" in task and rule:
+            return rule
+    sys.exit("!! 路由表里找不到调参那行(任务列含「不达标」)的铁律")
+
+
 def build():
     return {
         "hfss-model.md": MODEL.format(core=CORE, branches=model_branches()),
-        "hfss-tune.md": TUNE.format(core=CORE),
+        "hfss-tune.md": TUNE.format(core=CORE, tune_rule=tune_rule()),
     }
 
 
