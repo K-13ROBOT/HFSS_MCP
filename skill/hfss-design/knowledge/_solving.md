@@ -259,8 +259,12 @@ C4 结构的 S 矩阵是循环阵,按顺序相位馈电时**四个口的 ActiveS
 - 原因:**求解之后对几何做任何改动,HFSS 会把解整个作废**,而它只在**消息窗口**写一句
   `Solutions have been invalidated. Undo to recover.` —— COM 层面不报错、不返回任何信号。
   "改几何"的范围比直觉宽:**新画一条用来采样的 polyline 也算**。
-- 解法:取结果拿不到数时,**第一件事是 `get_messages`**,别去猜参数。
-  确认是解失效,就把几何改动做完再 `analyze` 一次。
+- **工具已能抓到**:`get_convergence(setup)` 读的是**当前这组设计变量**的收敛表,解被作废后它是空的,
+  返回 `has_solution: false` 并直接告警(实测:解完加一根线、不重解直接查,当场报出)。
+  `analyze` 的返回值里也带同一检查。
+  ⚠️ 别用 `GetValidISolutionList` 判这个 —— 解被作废后它**照样列着**,只能判"从没解过"。
+- 解法:看到 `has_solution: false`,或取结果拿不到数,把几何改动做完再 `analyze` 一次。
+  要知道是什么改动把解作废的,读 `get_messages`。
 - 通用判据:怀疑某个 design 到底解没解,看 `.aedtresults/<design>.results` 的**目录大小**
   —— 几 KB = 没解,几 MB 才是真有解和场。这个判据不依赖任何 API。
 
@@ -268,7 +272,11 @@ C4 结构的 S 矩阵是循环阵,按顺序相位馈电时**四个口的 ActiveS
 - 现象:`GetActiveObject` 报 `MK_E_UNAVAILABLE`(操作无法使用),但 `ansysedt.exe` 明明在跑。
   实例在跑却不在运行对象表(ROT)里;这时 `Dispatch` 能接上同一个实例。
 - 工具已兜底:`attach_desktop` 先试 `GetActiveObject`,失败**自动退回 `Dispatch`**,
-  返回里 `connected_via` 写明走了哪条。**不用再改走自己的脚本** —— 走脚本的话,
+  返回里 `connected_via` 写明走了哪条。**退回时不会悄悄新起实例**:之前一个 AEDT 都没在跑就直接报;
+  退回后冒出新进程(比如在跑的是别的版本)就判定"不是要接手的实例",关掉它并报错。
+  2019.2 不进 ROT,attach 永远接不上它,2019.2 只能 `open_desktop` 新起。
+- 接上之后**可以在已开着的工程里干活**(attach 本来就是为了接手它们,`activate_project` 切过去即可);
+  护栏只管收尾:不替用户关它们、不退出实例。**不用再改走自己的脚本** —— 走脚本的话,
   `analyze` 返回值里的收敛体检就一条都不起作用(实测吃过这个亏:全程脚本求解,工具层检查全部失效)。
 - ⚠️ **更要紧的是另一面:`Dispatch` 在 2025.2 上不是新起实例,是接管已在运行的那个**
   (2019.2 不进 ROT,才每次新起)。那个实例里可能开着用户自己的工程、或别的 Claude 会话的工程。

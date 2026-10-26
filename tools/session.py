@@ -67,6 +67,26 @@ def _clear(ctx):
     ctx["own_projects"] = set()       # 本会话 new_project / open_project 出来的
 
 
+def _aedt_pids():
+    """当前在跑的 ansysedt.exe 的 PID 集合;查不了返回 None(不据此做判断)。"""
+    import subprocess
+    try:
+        r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq ansysedt.exe", "/FO", "CSV", "/NH"],
+                           capture_output=True, timeout=15)
+        out = r.stdout.decode("gbk", errors="replace")
+    except Exception:
+        return None
+    pids = set()
+    for line in out.splitlines():
+        cells = [c.strip().strip('"') for c in line.split('","')]
+        if len(cells) > 1 and cells[0].lower() == "ansysedt.exe":
+            try:
+                pids.add(int(cells[1]))
+            except ValueError:
+                pass
+    return pids
+
+
 def _snapshot_foreign(ctx, oDesktop):
     """连上之后第一件事:记下实例里已经开着的工程。这些是别人的(用户自己的会话,
     或别的 Claude 会话)——close_desktop 时绝不能连它们一起关。"""
@@ -130,9 +150,10 @@ def open_desktop(ctx, version=None):
     if projs:
         out["attached_to_running_instance"] = True
         out["projects_open"] = projs
-        out["warning"] = (f"没有新起实例,而是接管了已在运行的 AEDT —— 里面开着 {len(projs)} 个工程"
-                          f"({', '.join(projs)}),是别人的。**只在自己新建/打开的工程里干活;"
-                          "close_desktop 不会退出这个实例**,只会关掉你自己的工程。")
+        out["note"] = (f"没有新起实例,而是接上了已在运行的 AEDT —— 里面开着 {len(projs)} 个工程"
+                       f"({', '.join(projs)})。**可以在里面干活**(用 activate_project 切过去);"
+                       "但 close_desktop **不会替你关闭它们,也不会退出这个实例**,"
+                       "只会关掉本会话自己新建/打开的工程。")
     return out
 
 
@@ -162,6 +183,13 @@ def attach_desktop(ctx, version=None):
         app = _wc.GetActiveObject(_progid(version))
         oDesktop = app.GetAppDesktop()
     except Exception as e1:
+        # attach 的语义是"不新启动"。可 Dispatch 在没有该版本实例在跑时会**悄悄新起一个**,
+        # 所以退回前后各查一次进程:之前一个都没有 → 直接报;之后冒出新 PID → 是新起的,
+        # 那不是用户要接手的实例,关掉它并报错。
+        pids0 = _aedt_pids()
+        if pids0 is not None and not pids0:
+            return {"ok": False, "error": "没有在运行的 AEDT 实例(找不到 ansysedt.exe 进程)",
+                    "hint": "attach 只接手已在运行的实例,不新起;要新起用 open_desktop"}
         try:
             app = _wc.Dispatch(_progid(version))
             oDesktop = app.GetAppDesktop()
@@ -171,6 +199,24 @@ def attach_desktop(ctx, version=None):
                     "error": f"连接运行中的 AEDT {version} 失败。GetActiveObject: {type(e1).__name__}: {e1};"
                              f" Dispatch: {type(e2).__name__}: {e2}",
                     "hint": "确认 HFSS 已在运行、版本号对得上;否则用 open_desktop 新启动"}
+        pids1 = _aedt_pids()
+        new = (pids1 - pids0) if (pids0 is not None and pids1 is not None) else set()
+        if new:
+            # 新起的实例里不可能有任何人的工程;确认为空再关,非空就不碰(宁可多留一个进程)
+            try:
+                empty = not list(oDesktop.GetProjectList() or [])
+            except Exception:
+                empty = False
+            if empty:
+                try:
+                    oDesktop.QuitApplication()
+                except Exception:
+                    pass
+            return {"ok": False,
+                    "error": f"没有在运行的 AEDT {version} 实例 —— 退回 Dispatch 时新起了一个"
+                             f"(PID {sorted(new)}),那不是你要接手的实例" + (",已关掉。" if empty else "。"),
+                    "hint": ("在跑的 AEDT 是别的版本?attach 时传对 version。"
+                             "注意 2019.2 不进 ROT,attach 永远接不上它 —— 2019.2 只能 open_desktop 新起")}
     _clear(ctx)
     ctx["app"] = app
     ctx["oDesktop"] = oDesktop
@@ -178,10 +224,12 @@ def attach_desktop(ctx, version=None):
     projs = _snapshot_foreign(ctx, oDesktop)
     out = {"ok": True, "version": version, "connected_via": via, "projects_open": projs}
     if projs:
-        out["warning"] = (f"这个实例里已经开着 {len(projs)} 个工程({', '.join(projs)})—— "
-                          "它们是别人的(用户自己的会话或别的 Claude 会话)。"
-                          "**只在自己新建/打开的工程里干活;close_desktop 不会退出这个实例**,"
-                          "只会关掉你自己的工程。")
+        # attach 本来就是为了接手已经开着的工程 —— 可以在里面干活。
+        # 护栏只管一件事:收尾时不替用户关它们、不退出这个实例。
+        out["note"] = (f"实例里已开着 {len(projs)} 个工程({', '.join(projs)})。"
+                       "**可以在里面干活**(用 activate_project 切过去);"
+                       "但 close_desktop **不会替你关闭它们,也不会退出这个实例** —— "
+                       "只会关掉本会话自己新建/打开的工程。改完记得 save_project。")
     return out
 
 
