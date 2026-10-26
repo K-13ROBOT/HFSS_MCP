@@ -258,9 +258,10 @@ C4 结构的 S 矩阵是循环阵,按顺序相位馈电时**四个口的 ActiveS
   查 `.aedtresults/<design>.results` 只有 8KB(真解过的同规模工程是 2.8MB)。
 - 原因:**求解之后对几何做任何改动,HFSS 会把解整个作废**,而它只在**消息窗口**写一句
   `Solutions have been invalidated. Undo to recover.` —— COM 层面不报错、不返回任何信号。
-  "改几何"的范围比直觉宽:**新画一条用来采样的 polyline 也算**。
+  "改几何"的范围比直觉宽:**新画一条用来采样的 polyline 也算** —— 除非画成非模型对象
+  (`create_polyline(non_model=True)`),那个不进网格,求解后补画不作废(实测)。
 - **工具已能抓到**:`get_convergence(setup)` 读的是**当前这组设计变量**的收敛表,解被作废后它是空的,
-  返回 `has_solution: false` 并直接告警(实测:解完加一根线、不重解直接查,当场报出)。
+  返回 `has_solution: false` 并直接告警(实测:解完加一根模型线、不重解直接查,完成遍数变 N/A,当场报出)。
   `analyze` 的返回值里也带同一检查。
   ⚠️ 别用 `GetValidISolutionList` 判这个 —— 解被作废后它**照样列着**,只能判"从没解过"。
 - 解法:看到 `has_solution: false`,或取结果拿不到数,把几何改动做完再 `analyze` 一次。

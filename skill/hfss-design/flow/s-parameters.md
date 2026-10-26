@@ -22,18 +22,18 @@
    - 没有该分离的对象 z 范围重叠(穿模)
    - 发现不对 → `delete_object` 改正后重建,**绝不带着错几何 analyze**(那是又错又慢的根源)
 7. **【建 setup 之前先往后看一步 —— 漏了就得整解重跑】**
-   问自己:**这个设计后面要取远场吗?要做电流诊断吗?** 要的话现在就把前置条件办了,
-   这三样都是"事后补 = 重新求解一遍":
+   问自己:**这个设计后面要取远场吗?** 要的话现在就把前置条件办了,
+   这两样都是"事后补 = 重新求解一遍":
 
    | 后面要做 | 现在必须先办 | 补办的代价 |
    |---|---|---|
    | 远场(增益/轴比/方向图)| **`create_infinite_sphere` 必须在 `create_setup` 之前建**;扫频要 `sweep_type='Discrete'` + `save_fields=True` | setup 建完再补球面,得重建 setup 重解 |
-   | 电流诊断 | **采样线(`create_polyline`)必须在 `analyze` 之前画好** | 求解后新画线算改几何,HFSS 把解整个作废且 COM 无任何提示 |
    | 轴比 vs 频率(`get_axial_ratio`)| 同远场,且扫频**必须** Discrete + save_fields(只设 `save_rad_fields` 不生效) | 整条扫频重解 |
 
-   拿不准后面要不要 → **就当要**:无穷远球面不参与求解、采样线不影响网格,
-   都是零成本;事后补才贵。细节分别见 [`farfield.md`](farfield.md) 和
-   [`diagnose-current.md`](diagnose-current.md) 的前置条件那段。
+   拿不准后面要不要 → **就当要**:无穷远球面不参与求解,零成本;事后补才贵。细节见 [`farfield.md`](farfield.md)。
+
+   电流诊断**不用**提前办:采样线用 `create_polyline(non_model=True)` 画,求解后补画也不作废解
+   (见 [`diagnose-current.md`](diagnose-current.md) 的铁律①)。
 
 8. `create_setup`(频率取工作频率)→ `create_sweep`(覆盖工作频率)。
    **存场扫频(`save_fields=True`)要当耗材管**:每条扫频在之后**每次** analyze 里都会重算,存场频点每个要写完整三维场(实测 ~90-100 秒/点、几百 MB/点),堆几条下来单轮求解能从十几分钟涨到一两个小时。取场/取远场用完就 `delete_sweep(setup, names, confirm=True)` 清掉,只留调参真正要看的那条

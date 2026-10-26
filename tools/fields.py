@@ -68,14 +68,19 @@ def _fields_report_to_csv(oDesign, soln, path, expr, point_count, freq, csv_path
             # 而"画一条采样用的 polyline"也算动几何。HFSS 只在消息窗口写一句
             # "Solutions have been invalidated",COM 这边完全看不出来。
             last = (f"form#{i}: 报告建出来了,但没有数据可导。"
-                    "最可能是解已失效 —— 求解后动过几何(**新画采样线也算**)。"
-                    "处理:先确保采样 polyline 已存在,再 analyze,然后才取场;"
+                    "最可能是解已失效 —— 求解后动过几何(**采样线没加 non_model=True 也算**)。"
+                    "处理:重新 analyze 再取场;采样线以后用 create_polyline(non_model=True),"
+                    "求解后补画不作废;"
                     "调 get_messages 能看到 'Solutions have been invalidated' 确认")
         except Exception as e:
             last = f"form#{i}(arity={len(args) + 3}): {type(e).__name__}: {e}"
         finally:
+            # 失败也可能留了个空报告,清掉再试下一种。先查在不在:对不存在的报告 DeleteReports
+            # 会在消息窗口记一条 [error] "Report not found"(2019.2 上 form#0 必失败,每次都留),
+            # 让 get_messages 里平白多出一条要人去追的假错误
             try:
-                oModule.DeleteReports([rname])   # 失败也可能留了个空报告,清掉再试下一种
+                if rname in [str(x) for x in oModule.GetAllReportNames()]:
+                    oModule.DeleteReports([rname])
             except Exception:
                 pass
     return False, f"取场报告失败。最后一次: {last}"
@@ -144,7 +149,7 @@ def _features(xs, ys, null_frac):
             "峰值与位置、内部零点数、首尾衰减 dB。**模次 = n_nulls + 1**(端点天然为零不计)。"
             "其余 get_* 只测进去多少/出来多少,这个看结构上实际流了什么。"
             "两条硬前提,违反了会拿到空数据或假读数(详见 `flow/diagnose-current.md`):"
-            "**采样线必须在 analyze 之前画好**(求解后建 polyline 会让解作废,且 COM 无任何提示);"
+            "**采样线用 create_polyline(non_model=True) 画**(模型线求解后画会让解作废,COM 无提示;非模型线不会);"
             "**线要略短于导体、避开馈电点**。什么时候该调见 `flow/diagnose-current.md`,别每次取结果都调。"),
         "parameters": {
             "type": "object",

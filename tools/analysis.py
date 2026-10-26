@@ -1149,7 +1149,7 @@ def _convergence_check(ctx, setup, before=None):
     # 只对确定的事下结论
     if not c.get("has_solution"):
         warns.append("**当前这组设计变量没有可用的解**(收敛表是空的)—— 典型是求解后又改过几何"
-                     "(**新画一根采样线也算**),解被作废了;或者这组变量还没解过。"
+                     "(**画采样线没加 non_model=True 也算**),解被作废了;或者这组变量还没解过。"
                      "不要拿任何取数结果当真,重新 analyze。")
     elif c.get("converged") is False:
         warns.append(f"**没有收敛**:跑了 {c.get('passes_completed')}/{c.get('passes_max')} 轮,"

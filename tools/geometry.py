@@ -188,9 +188,9 @@ def get_object_bbox(ctx, name=None):
     return {"ok": True, "unit": "mm", "count": len(out), "bboxes": out}
 
 
-def _attributes(name, material):
+def _attributes(name, material, flags=""):
     color, transp = _color_for(material)
-    return ["NAME:Attributes", "Name:=", name, "Flags:=", "", "Color:=", color,
+    return ["NAME:Attributes", "Name:=", name, "Flags:=", flags, "Color:=", color,
             "Transparency:=", float(transp), "PartCoordinateSystem:=", "Global",
             "MaterialValue:=", f'"{material}"', "SolveInside:=", _solve_inside(material)]
 
@@ -327,7 +327,8 @@ def create_sphere(ctx, name, center, radius, material="vacuum"):
     "function": {
         "name": "create_polyline",
         "description": ("创建折线/多边形。points 是顶点列表 [[x,y,z],...](带单位)。"
-                        "close_surface=True 闭合,cover_surface=True 覆面成 sheet(用于不规则贴片/缝隙等)。"),
+                        "close_surface=True 闭合,cover_surface=True 覆面成 sheet(用于不规则贴片/缝隙等)。"
+                        "**画场采样线用 non_model=True**:非模型对象不进网格,求解后补画也不会让解作废。"),
         "parameters": {
             "type": "object",
             "properties": {
@@ -338,12 +339,15 @@ def create_sphere(ctx, name, center, radius, material="vacuum"):
                 "close_surface": {"type": "boolean", "default": True, "description": "是否闭合"},
                 "cover_surface": {"type": "boolean", "default": True, "description": "是否覆面成 sheet"},
                 "material": {"type": "string", "default": "vacuum"},
+                "non_model": {"type": "boolean", "default": False,
+                              "description": "非模型对象(只当采样线/参考线,不参与求解)"},
             },
             "required": ["name", "points"],
         },
     },
 })
-def create_polyline(ctx, name, points, close_surface=True, cover_surface=True, material="vacuum"):
+def create_polyline(ctx, name, points, close_surface=True, cover_surface=True, material="vacuum",
+                    non_model=False):
     oEditor = ctx["oEditor"]
     n = len(points)
     pts_arg = ["NAME:PolylinePoints"]
@@ -366,11 +370,13 @@ def create_polyline(ctx, name, points, close_surface=True, cover_surface=True, m
              ["NAME:PolylineXSection", "XSectionType:=", "None", "XSectionOrient:=", "Auto",
               "XSectionWidth:=", "0mm", "XSectionTopWidth:=", "0mm", "XSectionHeight:=", "0mm",
               "XSectionNumSegments:=", "0", "XSectionBendType:=", "Corner"]],
-            _attributes(name, material))
+            # NonModel#:不进网格、不算改几何 —— 求解后补画采样线不会让解作废(模型线会)
+            _attributes(name, material, "NonModel#" if non_model else ""))
     except Exception as e:
         return {"ok": False, "error": f"CreatePolyline 失败: {type(e).__name__}: {e}"}
     if "state" in ctx:
-        ctx["state"].objects[name] = {"type": "polyline", "material": material, "covered": bool(cover_surface)}
+        ctx["state"].objects[name] = {"type": "polyline", "material": material, "covered": bool(cover_surface),
+                                      "non_model": bool(non_model)}
     return {"ok": True, "name": name}
 
 
