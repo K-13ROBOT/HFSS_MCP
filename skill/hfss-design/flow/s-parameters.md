@@ -32,7 +32,7 @@
 
    拿不准后面要不要 → **就当要**:无穷远球面不参与求解,零成本;事后补才贵。细节见 [`farfield.md`](farfield.md)。
 
-   电流诊断**不用**提前办:采样线用 `create_polyline(non_model=True)` 画,求解后补画也不作废解
+   电流诊断**不用**提前办:采样线用 `create_polyline(non_model=True, close_surface=False, cover_surface=False)` 画,求解后补画也不作废解
    (见 [`diagnose-current.md`](diagnose-current.md) 的铁律①)。
 
 8. `create_setup`(频率取工作频率)→ `create_sweep`(覆盖工作频率)。

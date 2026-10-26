@@ -16,7 +16,7 @@
 import os
 import math
 
-from . import tool
+from . import tool, resolve_setup
 
 
 # Fields 报告的 families **必须把该 design 的全部设计变量列全**(各取 ["Nominal"]),
@@ -182,11 +182,9 @@ def get_current_along_path(ctx, path, setup=None, sweep="LastAdaptive", freq=Non
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
 
-    if setup is None:
-        setups = list(state.setups.keys()) if state else []
-        if not setups:
-            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup)"}
-        setup = setups[0]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
 
     # 先挡掉最常见的失败:取非自适应频点的场,却没存场。省一次几十秒的 COM 往返。
     if sweep != "LastAdaptive" and state:

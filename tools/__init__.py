@@ -45,6 +45,23 @@ def tool(schema):
     return deco
 
 
+def resolve_setup(ctx, setup=None):
+    """要用的 setup 名。显式给的直接用;否则取 state 里第一个,state 为空(attach / 重开工程后)
+    再问 HFSS。返回 (setup, None),找不到返回 (None, 错误 dict)。"""
+    if setup:
+        return setup, None
+    state = ctx.get("state")
+    setups = list(state.setups.keys()) if state else []
+    if not setups:
+        try:
+            setups = [str(x) for x in (ctx["oDesign"].GetModule("AnalysisSetup").GetSetups() or [])]
+        except Exception:
+            setups = []
+    if not setups:
+        return None, {"ok": False, "error": "这个 design 里没有 setup,先 create_setup"}
+    return setups[0], None
+
+
 def get_schemas():
     return [t["schema"] for t in TOOLS.values()]
 

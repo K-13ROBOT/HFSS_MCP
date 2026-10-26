@@ -7,7 +7,7 @@ setup 走 InsertSetup("OptiOptimization", arg) 带 Goal;求解走 Optimetrics.So
 
 import time
 
-from . import tool
+from . import tool, resolve_setup
 
 
 def _opti(ctx):
@@ -58,11 +58,9 @@ def create_optimization(ctx, name, calculation, variables, condition="<=", goal_
                         freq=None, optimizer="Quasi Newton", max_iterations=20, setup=None, sweep="LastAdaptive"):
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
-    setups = list(state.setups.keys()) if state else []
-    if setup is None:   # 只有没显式给 setup 才需要 state;重开工程后 state.setups 为空,显式给的不该被挡
-        if not setups:
-            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup)"}
-        setup = setups[0]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
     freq = freq or (state.setups.get(setup, {}).get("frequency") if state else None)
     if not freq:
         return {"ok": False, "error": "缺 freq 且无法从 setup 推断", "hint": "传 freq='2.4GHz'"}
@@ -229,11 +227,9 @@ def create_sensitivity(ctx, name, variables, calculation, freq=None, setup=None,
                        sweep="LastAdaptive", max_iterations=10):
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
-    setups = list(state.setups.keys()) if state else []
-    if setup is None:
-        if not setups:
-            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup)"}
-        setup = setups[0]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
     freq = freq or (state.setups.get(setup, {}).get("frequency") if state else None)
     if not freq:
         return {"ok": False, "error": "缺 freq 且无法从 setup 推断", "hint": "传 freq='2.4GHz'"}
@@ -485,11 +481,9 @@ def create_statistical(ctx, name, variables, calculation, freq=None, setup=None,
                        sweep="LastAdaptive", trials=50, latin_hypercube=True, seed=0):
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
-    setups = list(state.setups.keys()) if state else []
-    if setup is None:
-        if not setups:
-            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup)"}
-        setup = setups[0]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
     freq = freq or (state.setups.get(setup, {}).get("frequency") if state else None)
     if not freq:
         return {"ok": False, "error": "缺 freq 且无法从 setup 推断", "hint": "传 freq='2.4GHz'"}

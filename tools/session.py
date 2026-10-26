@@ -65,6 +65,7 @@ def _clear(ctx):
     ctx["design_name"] = None
     ctx["foreign_projects"] = set()   # 连上时实例里已经开着的工程 —— 别人的,不许关
     ctx["own_projects"] = set()       # 本会话 new_project / open_project 出来的
+    ctx["shared_instance"] = False    # 连上的是已在运行的实例(不是本会话起的)—— 收尾不许退出它
 
 
 def _aedt_pids():
@@ -128,16 +129,21 @@ def open_desktop(ctx, version=None):
     if _alive(ctx):
         return {"ok": False, "error": "desktop 已打开且存活,如需重启先 close_desktop"}
     version = version or _DEFAULT_VERSION
+    pids0 = _aedt_pids()
     try:
         app = _wc.Dispatch(_progid(version))
         oDesktop = app.GetAppDesktop()
     except Exception as e:
         return {"ok": False, "error": f"连接 AEDT {version} 失败: {type(e).__name__}: {e}",
                 "hint": f"确认已装 {version} 且 COM ProgID '{_progid(version)}' 已注册"}
+    pids1 = _aedt_pids()
     _clear(ctx)
     ctx["app"] = app
     ctx["oDesktop"] = oDesktop
     ctx["version"] = version
+    # 前后都查得到进程、且多出了新 PID = 本会话新起的实例,收尾可以退出它。
+    # 没多出 PID(接上了在跑的实例,哪怕里面一个工程都没开)或查不了进程 → 当共享实例,收尾不退出。
+    ctx["shared_instance"] = not (pids0 is not None and pids1 is not None and bool(pids1 - pids0))
     try:
         real_ver = oDesktop.GetVersion()
     except Exception:
@@ -147,6 +153,10 @@ def open_desktop(ctx, version=None):
     # 未存的改动丢失。所以这里同样记下已开工程,close_desktop 据此拒绝退出。
     projs = _snapshot_foreign(ctx, oDesktop)
     out = {"ok": True, "version": version, "aedt_version": real_ver}
+    if ctx["shared_instance"] and not projs:
+        out["attached_to_running_instance"] = True
+        out["note"] = ("没有确认到新起实例(接上了已在运行的 AEDT,或查不了进程)。"
+                       "close_desktop 只会关掉本会话自己的工程,**不会退出这个实例**。")
     if projs:
         out["attached_to_running_instance"] = True
         out["projects_open"] = projs
@@ -187,7 +197,13 @@ def attach_desktop(ctx, version=None):
         # 所以退回前后各查一次进程:之前一个都没有 → 直接报;之后冒出新 PID → 是新起的,
         # 那不是用户要接手的实例,关掉它并报错。
         pids0 = _aedt_pids()
-        if pids0 is not None and not pids0:
+        if pids0 is None:
+            # 查不了进程就分辨不出 Dispatch 是接上了还是新起了 —— 不冒这个险
+            return {"ok": False,
+                    "error": f"GetActiveObject 失败({type(e1).__name__}: {e1}),且查不了进程列表,"
+                             "无法确认退回 Dispatch 不会新起实例,所以没有退回",
+                    "hint": "确认 HFSS 已在运行、version 对得上;要新起用 open_desktop"}
+        if not pids0:
             return {"ok": False, "error": "没有在运行的 AEDT 实例(找不到 ansysedt.exe 进程)",
                     "hint": "attach 只接手已在运行的实例,不新起;要新起用 open_desktop"}
         try:
@@ -200,7 +216,7 @@ def attach_desktop(ctx, version=None):
                              f" Dispatch: {type(e2).__name__}: {e2}",
                     "hint": "确认 HFSS 已在运行、版本号对得上;否则用 open_desktop 新启动"}
         pids1 = _aedt_pids()
-        new = (pids1 - pids0) if (pids0 is not None and pids1 is not None) else set()
+        new = (pids1 - pids0) if pids1 is not None else set()
         if new:
             # 新起的实例里不可能有任何人的工程;确认为空再关,非空就不碰(宁可多留一个进程)
             try:
@@ -221,6 +237,7 @@ def attach_desktop(ctx, version=None):
     ctx["app"] = app
     ctx["oDesktop"] = oDesktop
     ctx["version"] = version
+    ctx["shared_instance"] = True     # attach 接的一定是别人起的实例
     projs = _snapshot_foreign(ctx, oDesktop)
     out = {"ok": True, "version": version, "connected_via": via, "projects_open": projs}
     if projs:
@@ -251,10 +268,26 @@ def new_project(ctx, name):
         return {"ok": False, "error": "未打开 desktop,先 open_desktop"}
     try:
         oProject = oDesktop.NewProject()
-        path = os.path.join(PROJECTS_DIR, f"{name}.aedt")
+    except Exception as e:
+        return {"ok": False, "error": f"新建工程失败: {type(e).__name__}: {e}"}
+    path = os.path.join(PROJECTS_DIR, f"{name}.aedt")
+    try:
         oProject.SaveAs(path, True)
     except Exception as e:
-        return {"ok": False, "error": f"新建/保存工程失败: {type(e).__name__}: {e}"}
+        # 已经开出来的空工程要收掉,否则 close_desktop 会把它当成别人的,从此不退出实例
+        leftover = None
+        try:
+            leftover = str(oProject.GetName())
+            oDesktop.CloseProject(leftover)
+            leftover = None
+        except Exception:
+            if leftover:
+                ctx.setdefault("own_projects", set()).add(leftover)
+        out = {"ok": False, "error": f"保存工程到 {path} 失败: {type(e).__name__}: {e}",
+               "hint": "检查 projects 目录是否可写、工程名是否合法"}
+        if leftover:
+            out["left_open"] = leftover
+        return out
     ctx["oProject"] = oProject
     ctx["project_name"] = name
     ctx.setdefault("own_projects", set()).add(name)
@@ -607,43 +640,72 @@ def close_desktop(ctx, save=False):
         return {"ok": False, "error": "读不到实例里开着哪些工程,**为安全起见没有退出 AEDT**(只清了本会话状态)",
                 "hint": "确认没有别人的工程开着,再让用户手工关"}
     others = [p for p in current if p not in own]
-    if others:
+    mine = [p for p in current if p in own]
+    # save=True 先把自己的工程都存了;存不上的**不关、不退出**,宁可留着进程也不丢改动
+    save_failed = {}
+    if save:
+        for p in mine:
+            err = _save_project_by_name(oDesktop, p)
+            if err:
+                save_failed[p] = err
+    if others or ctx.get("shared_instance") or save_failed:
         closed, failed = [], {}
-        for p in current:
-            if p not in own:
+        for p in mine:
+            if p in save_failed:
                 continue
             try:
-                proj = oDesktop.SetActiveProject(p)
-                if save:
-                    try:
-                        proj.Save()
-                    except Exception:
-                        pass
                 oDesktop.CloseProject(p)
                 closed.append(p)
             except Exception as e:
                 failed[p] = f"{type(e).__name__}: {e}"
         _clear(ctx)
-        out = {"ok": True, "quit_application": False,
-               "closed_own_projects": closed,
-               "left_open_not_ours": others,
-               "note": (f"实例里还开着 {len(others)} 个不是本会话的工程({', '.join(others)}),"
-                        "**没有退出 AEDT** —— 只关掉了本会话自己的工程。")}
+        out = {"ok": not save_failed, "quit_application": False,
+               "closed_own_projects": closed}
+        if others:
+            out["left_open_not_ours"] = others
+            out["note"] = (f"实例里还开着 {len(others)} 个不是本会话的工程({', '.join(others)}),"
+                           "**没有退出 AEDT** —— 只关掉了本会话自己的工程。")
+        elif not save_failed:
+            out["note"] = "这个实例不是本会话起的,**没有退出 AEDT** —— 只关掉了本会话自己的工程。"
+        if save_failed:
+            out["save_failed"] = save_failed
+            out["error"] = (f"{len(save_failed)} 个工程保存失败({', '.join(save_failed)}),"
+                            "**没有关闭它们、也没有退出 AEDT**,改动还在实例里")
+            out["hint"] = "让用户在 GUI 里手工另存,或查 get_messages 看保存为什么失败"
         if failed:
             out["close_failed"] = failed
         return out
     try:
-        if save and ctx.get("oProject") is not None:
-            try:
-                ctx["oProject"].Save()
-            except Exception:
-                pass
         oDesktop.QuitApplication()
     except Exception as e:
         _clear(ctx)
         return {"ok": False, "error": f"关闭 desktop 出错: {e},但状态已清空"}
     _clear(ctx)
     return {"ok": True, "quit_application": True}
+
+
+def _save_project_by_name(oDesktop, name):
+    """按名保存一个已开工程。成功返回 None,失败返回错误串。"""
+    proj = None
+    try:
+        proj = oDesktop.SetActiveProject(name)
+    except Exception:
+        pass
+    if proj is None:   # 老版本 SetActiveProject 可能返回 None,从已开工程里按名找
+        try:
+            for q in (oDesktop.GetProjects() or []):
+                if str(q.GetName()) == name:
+                    proj = q
+                    break
+        except Exception:
+            pass
+    if proj is None:
+        return "取不到工程对象"
+    try:
+        proj.Save()
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"
+    return None
 
 
 @tool({

@@ -7,7 +7,7 @@ create/run + 结果提取(S11 + 远场指标,报告导出带 variation 列再按
 import os as _os
 import time
 
-from . import tool
+from . import tool, resolve_setup
 
 _POL = {"total": "Total", "lhcp": "LHCP", "rhcp": "RHCP", "theta": "Theta", "phi": "Phi"}
 _CROSS = {"lhcp": "rhcp", "rhcp": "lhcp", "theta": "phi", "phi": "theta"}
@@ -61,11 +61,9 @@ def _parametrics_of(ctx):
 })
 def create_parametric_sweep(ctx, name, variables, setup=None, save_fields=False):
     state = ctx.get("state")
-    setups = list(state.setups.keys()) if state else []
-    if setup is None:   # 只有没显式给 setup 才需要 state;重开工程后 state.setups 为空,显式给的不该被挡
-        if not setups:
-            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup)"}
-        setup = setups[0]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
 
     # 表达式型变量(如 '0.1*109.1mm'、'MH1-1mm')直接进 OptiParametric 会 InsertSetup com_error。
     # 建参扫前先把每个被扫变量钉成它求值后的纯数值(单位保留),避免崩;只读单值不影响下游引用。
@@ -390,7 +388,7 @@ def get_parametric_results(ctx, parametric, setup=None, sweep="LastAdaptive", po
     names, variations = _variations(ctx, parametric, setup)
     if not names:
         return {"ok": False, "error": f"参扫 '{parametric}' 未知或无变量"}
-    setup = setup or (list(st.setups.keys())[0] if st and st.setups else None)
+    setup, _ = resolve_setup(ctx, setup)
     port = port or (list(st.excitations.keys())[0] if st and st.excitations else None)
     if not setup or not port:
         return {"ok": False, "error": "缺 setup 或 port"}
@@ -445,7 +443,9 @@ def _ff_metric(ctx, parametric, expr, sphere, setup, sweep, phi=None, reduce_fn=
     names, variations = _variations(ctx, parametric, setup)
     if not names:
         return None, f"参扫 '{parametric}' 未知或无变量"
-    setup = setup or (list(st.setups.keys())[0] if st and st.setups else None)
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return None, err["error"]
     soln = f"{setup} : {sweep}"
     trace = ["X Component:=", "Theta", "Y Component:=", [expr]]
     oDesign = ctx["oDesign"]

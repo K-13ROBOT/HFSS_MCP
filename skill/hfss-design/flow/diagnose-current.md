@@ -7,7 +7,9 @@
 方向图歪了不知道是哪部分在辐射 —— 这时候 `get_current_along_path` 看结构上**实际流了什么**,
 比接着扫参试快得多。
 
-用法:先 `create_polyline(non_model=True)` 沿着要考察的导体画一条贴着表面的线(不必闭合/覆面),
+用法:先 `create_polyline(non_model=True, close_surface=False, cover_surface=False)`
+沿着要考察的导体画一条贴着表面的开口线(**后两个参数默认都是 True,不写就会闭合并覆面成 sheet**,
+采样路径变成一去一回,`n_nulls`/`peak_at_fraction` 全错),
 再 `get_current_along_path(path='那条线')`。返回采样曲线 + 三个判据:
 - **`n_nulls`** = 内部电流零点数,**模次 = n_nulls + 1**(基模 0、全波 1、三次模 2)
 - **`peak_at_fraction`** = 电流峰值在线上的归一位置 → 谐振实际住在哪

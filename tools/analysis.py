@@ -9,7 +9,7 @@ import io
 import os
 import re
 
-from . import tool
+from . import tool, resolve_setup
 
 
 def _drop_stale(csv_path):
@@ -329,14 +329,17 @@ def delete_setup(ctx, names=None, confirm=False):
 def analyze(ctx, setup=None):
     import time
     oDesign = ctx["oDesign"]
-    setups = list(ctx["state"].setups.keys()) if "state" in ctx else []
-    if setup is None:
-        if not setups:
-            return {"ok": False, "error": "无 setup,先 create_setup + create_sweep"}
-        setup = setups[0]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
     print(f"  [Solving] {setup} ...")
-    # 求解前先导一份收敛表:求解后若与之一字不差,说明 HFSS 复用了缓存解、没重算
-    before = _export_convergence(ctx, setup)
+    # 求解前先导一份收敛表:求解后若与之一字不差,说明 HFSS 复用了缓存解、没重算。
+    # 从没解过的 setup 不导 —— 对没解的 setup 导收敛表会在消息窗口留一条假 [error]
+    valid = _valid_solutions(ctx)
+    if valid is not None and not any(v.startswith(f"{setup} :") for v in valid):
+        before = {"has_solution": False}
+    else:
+        before = _export_convergence(ctx, setup)
     t0 = time.time()
     try:
         oDesign.Analyze(setup)   # 阻塞;COM 自动化同步返回
@@ -381,11 +384,9 @@ def get_s_parameters(ctx, setup=None, sweep=None, port=None, summary_only=True, 
     state = ctx.get("state")
 
     # 解析 setup / sweep / port(从 state)
-    setups = list(state.setups.keys()) if state else []
-    if setup is None:   # 只有没显式给 setup 才需要 state;重开工程后 state.setups 为空,显式给的不该被挡
-        if not setups:
-            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup/sweep/port)"}
-        setup = setups[0]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
     sw_list = state.setups.get(setup, {}).get("sweeps", []) if state else []
     if sweep is None:
         if sw_list:
@@ -580,11 +581,9 @@ def get_input_metrics(ctx, setup=None, sweep=None, port=None, z0=50, vswr_max=2.
     import math
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
-    setups = list(state.setups.keys()) if state else []
-    if setup is None:   # 只有没显式给 setup 才需要 state;重开工程后 state.setups 为空,显式给的不该被挡
-        if not setups:
-            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup/sweep/port)"}
-        setup = setups[0]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
     sws = state.setups.get(setup, {}).get("sweeps", []) if state else []
     if sweep is None:
         if not sws:
@@ -685,11 +684,9 @@ def get_radiation_pattern(ctx, setup=None, sweep="LastAdaptive", sphere="Sphere1
                           phi_cuts=None, gain_type="realized", polarization="total", freq=None):
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
-    setups = list(state.setups.keys()) if state else []
-    if setup is None:   # 只有没显式给 setup 才需要 state;重开工程后 state.setups 为空,显式给的不该被挡
-        if not setups:
-            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup/sweep/port)"}
-        setup = setups[0]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
     if not phi_cuts:
         phi_cuts = ["0deg", "90deg"]
     suffix = _POL.get(polarization, "Total")
@@ -952,11 +949,9 @@ def create_eigenmode_setup(ctx, name, min_frequency, num_modes=1, max_passes=6,
 def get_eigenmodes(ctx, setup=None, sweep="LastAdaptive", path=None):
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
-    if setup is None:
-        setups = list(state.setups.keys()) if state else []
-        if not setups:
-            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup)"}
-        setup = setups[0]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
 
     from .session import EXPORTS_DIR
     path = path or os.path.join(EXPORTS_DIR, f"_eig_{setup}.eig")
@@ -1095,8 +1090,8 @@ def _export_convergence(ctx, setup):
         v = [int(x) if float(x).is_integer() else x for x in _nums(kv.get(k))]
         return v[0] if len(v) == 1 else (v or None)     # 多频 setup 是列表,每个频点一个
 
-    out = {"variation": kv.get("DesignVariation"),          # 2025.2 才有这一行
-           "criterion": kv.get("Criterion"),
+    # 不报 DesignVariation:它把所有变量(含派生量)全列一遍,动辄上百个;导的本来就是当前这组
+    out = {"criterion": kv.get("Criterion"),
            "target": num("Target"),
            "final_value": num("Current"),
            "passes_completed": num("Completed"),
@@ -1106,9 +1101,16 @@ def _export_convergence(ctx, setup):
     conv = kv.get("Converged")
     out["converged"] = None if conv is None else conv.strip().lower().startswith("y")
     out["has_solution"] = str(kv.get("Completed", "")).strip().upper() not in ("", "N/A")
-    if rows:
-        out["elements"] = int(float(rows[-1][1])) if len(rows[-1]) > 1 else None
-        out["elements_by_pass"] = [int(float(r[1])) for r in rows if len(r) > 1]
+    # 网格单元数列:某些求解类型/版本里不是纯整数(N/A、千分位逗号)—— 解析不了就跳过,
+    # 不能让一个格子把整次求解报成失败
+    elems = []
+    for r in rows:
+        v = _nums(r[1].replace(",", "")) if len(r) > 1 else []
+        if v:
+            elems.append(int(v[0]))
+    if elems:
+        out["elements"] = elems[-1]
+        out["elements_by_pass"] = elems
     out = {k: v for k, v in out.items() if v is not None}
     out["_raw"] = txt               # 给 analyze 比对"前后是否完全一样"(判缓存)用,返回前删掉
     return out
@@ -1175,16 +1177,9 @@ def _convergence_check(ctx, setup, before=None):
     },
 })
 def get_convergence(ctx, setup=None):
-    if setup is None:
-        setups = list(ctx["state"].setups.keys()) if ctx.get("state") else []
-        if not setups:
-            try:
-                setups = [str(x) for x in ctx["oDesign"].GetModule("AnalysisSetup").GetSetups()]
-            except Exception:
-                setups = []
-        if not setups:
-            return {"ok": False, "error": "这个 design 里没有 setup"}
-        setup = setups[0]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
     summary, warns = _convergence_check(ctx, setup)
     out = {"ok": True, "setup": setup}
     if summary:

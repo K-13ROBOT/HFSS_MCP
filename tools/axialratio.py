@@ -10,7 +10,7 @@
 
 import os
 
-from . import tool
+from . import tool, resolve_setup
 
 
 def _contiguous_bands(freqs, vals, threshold):
@@ -77,11 +77,9 @@ def get_axial_ratio(ctx, setup=None, sweep="Sweep1", sphere="Sphere1", theta="0d
                     threshold_dB=3, freq_range=None, max_curve_points=60):
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
-    setups = list(state.setups.keys()) if state else []
-    if setup is None:   # 只有没显式给 setup 才需要 state;重开工程后 state.setups 为空,显式给的不该被挡
-        if not setups:
-            return {"ok": False, "error": "无 setup(重开工程后请显式传 setup)"}
-        setup = setups[0]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
 
     expr = "dB(AxialRatioValue)"
     soln = "%s : %s" % (setup, sweep)
