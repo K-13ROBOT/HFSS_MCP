@@ -130,4 +130,4 @@ def dispatch(name, args, ctx):
                     "error": _trace.truncate(err, 200) if err else None, "duration_ms": dt_ms})
 
 
-from . import session, geometry, booleans, transforms, variables, boundaries, excitations, analysis, mesh, parametrics, optimization, design, periodic, axialratio, sources, diagnostics, fields
+from . import session, geometry, booleans, transforms, variables, boundaries, excitations, analysis, mesh, parametrics, optimization, design, periodic, axialratio, sources, diagnostics, fields, history

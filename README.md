@@ -6,19 +6,20 @@
 
 **连接全走 win32com 裸调 AEDT 原生脚本 API**(oDesktop/oEditor/oModule),**不依赖 PyAEDT**。实测 2019.2 和 2025.2 都通,PyAEDT/gRPC 够不到的老版本 HFSS(如 2019)也能驱动。
 
-**目录**:[为什么不依赖 PyAEDT](#为什么不依赖-pyaedt) · [能做什么](#能做什么93-个工具) · [skill 层](#skill-层三个) · [已验证](#已验证) · [安装](#安装) · [配置 & 用法](#配置--用法) · [用别的 MCP 客户端](#用别的-mcp-客户端) · [代码结构](#代码结构) · [已知的版本差异](#已知的版本差异)
+**目录**:[为什么不依赖 PyAEDT](#为什么不依赖-pyaedt) · [能做什么](#能做什么96-个工具) · [skill 层](#skill-层三个) · [已验证](#已验证) · [安装](#安装) · [配置 & 用法](#配置--用法) · [用别的 MCP 客户端](#用别的-mcp-客户端) · [代码结构](#代码结构) · [已知的版本差异](#已知的版本差异)
 
 ## 为什么不依赖 PyAEDT
 
 - 连接 = `win32com.Dispatch("Ansoft.ElectronicsDesktop." + version)`(ProgID 每个装机版本都注册),不卡 PyAEDT 版本下限,也不依赖 gRPC(2022R2+ 才有)。
 - 操作 = AEDT 原生脚本 API(宏录制那套),自 ~v15 稳定。
 
-## 能做什么(93 个工具)
+## 能做什么(96 个工具)
 
 | 域 | 能力 |
 |---|---|
 | **会话** | open/attach/close、新建工程与设计、**从路径打开已有 .aedt**、切换/列举、保存工程、reset |
 | **几何** | box/rectangle/circle/cylinder/sphere/polyline/helix、布尔(并/减/交)、`split`、`thicken`(sheet→实体)、变换(移动/旋转/镜像/线阵·环阵复制)、变量驱动、材料(含**自定义 εr/tanδ**)、delete |
+| **改已有对象** | `get_object_history` 看建模历史(每步操作的路径和参数,含布尔里被消耗的工具对象、多边形去重点表);`set_history_props` 改某一步的参数(如减掉的工具圆的半径/圆心);`replace_in_history` 把写死的值批量换成表达式(如馈线多边形里 200 个点的锚点 `-1.8mm` → 变量)。不新建对象,改完跟着变量联动。2019.2 没有对象模型,只能按 `对象:命令:序号` 改单个操作的参数 |
 | **自检 & 诊断** | `get_object_bbox`(看层叠/搭接)、`design_summary`、list_objects/variables;**`validate_design`**(HFSS 自带 Validation Check,analyze 前挡配置漏)、**`get_messages`**(读消息窗口——"跑通了但数不对"的第一手线索) |
 | **边界** | Perfect E / Perfect H / 有限电导率 / 阻抗面 / 集总 RLC、开放辐射边界、远场球 |
 | **馈电** | 集总端口、**波导端口**(多模/de-embed)、边馈/微带(一步)、同轴探针(一步)——均验证能产出**真匹配**;**端口幅度/相位**(双馈 CP 90°、差分 180°、相控阵扫描) |
@@ -201,13 +202,13 @@ server 是标准 MCP stdio,**任何 MCP 客户端都能挂**(Claude Desktop、Cl
 }
 ```
 
-**兼容性已实测**(用通用 MCP SDK 客户端,非 Claude Code):协议版本 2024-11-05 / 2025-03-26 / 2025-06-18 都能正确协商降级;93 个工具 schema 全合规;返回统一 `TextContent` + UTF-8 JSON;stdout 做了 fd 级隔离。**cwd 由客户端决定**——落在不可写目录(如系统目录)时,`projects/`、`exports/`、`traces/` 会自动退到 `~/.hfss-agent/`,不会像以前那样在 initialize 之前就崩。
+**兼容性已实测**(用通用 MCP SDK 客户端,非 Claude Code):协议版本 2024-11-05 / 2025-03-26 / 2025-06-18 都能正确协商降级;96 个工具 schema 全合规;返回统一 `TextContent` + UTF-8 JSON;stdout 做了 fd 级隔离。**cwd 由客户端决定**——落在不可写目录(如系统目录)时,`projects/`、`exports/`、`traces/` 会自动退到 `~/.hfss-agent/`,不会像以前那样在 initialize 之前就崩。
 
 **长任务不再阻塞协议**:所有 COM 调用跑在一个专用线程上,事件循环全程空闲——实测 `analyze` 求解期间 `tools/list` 连续 9 次全部 <0.01s 返回。客户端的 ping/keepalive 不会超时,不会误判 server 已死而杀进程。但注意**两点仍然成立**:① `analyze` 这个请求本身就是几分钟,设了硬性单请求超时的客户端仍会在这一个调用上超时;② 求解**无法中途中止**(阻塞 COM 调用没有中断点),客户端发的 cancel 会被应答但求解照跑,后续调用排在它后面。
 
 换客户端会**丢两样 Claude Code 专属能力**,知道就行:
 
-1. **三个 skill 都不会自动加载**——那是 Claude 的 skill 机制,别的客户端不读。93 个工具照样能调,但丢了"怎么正确用"的纪律([skill 层](#skill-层三个)那一节的全部内容)。
+1. **三个 skill 都不会自动加载**——那是 Claude 的 skill 机制,别的客户端不读。96 个工具照样能调,但丢了"怎么正确用"的纪律([skill 层](#skill-层三个)那一节的全部内容)。
    - 变通:把 `skill/hfss-design/SKILL.md` 放进那个 agent 的 system prompt 当指南;要查文献或还原叠层再补 `skill/hfss-search/` 或 `skill/hfss-stackup/` 的 SKILL.md。
    - `design/` 卡片库不受影响——它由 `search_designs` / `read_design_card` 经 MCP 提供,任何客户端都取得到;`knowledge/` 和 `papers/` 则要靠那个 agent 自己有文件读取能力。
 2. **确认门**——如上,stdio 下进程内确认已关。客户端若没有工具授权 UI,`analyze`/扫参/优化会**直接跑、不问你**。用支持 MCP 工具授权的客户端,或自己留意别误触。
