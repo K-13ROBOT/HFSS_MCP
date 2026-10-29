@@ -17,6 +17,7 @@ NO_HFSS_REQUIRED = {
     "new_project", "open_project", "activate_project", "list_projects",
     "new_design", "activate_design", "list_designs",
     "search_designs", "read_design_card", "check_design_targets",
+    "extra_tools",    # 只看分组参数时不需要 design;真调用时内层 dispatch 照常检查
     "get_messages",   # 消息窗口:design 坏掉/没建起来时最需要读它,不能被 active design 挡住
 }
 
@@ -80,7 +81,9 @@ def setup_freqs(oDesign):
 
 
 def get_schemas():
-    return [t["schema"] for t in TOOLS.values()]
+    """tools/list 下发的 schema:按需加载的扩展工具不列,经 extra_tools 调(见 toolsets.py)。"""
+    from .toolsets import EXTRA_TOOLS
+    return [t["schema"] for n, t in TOOLS.items() if n not in EXTRA_TOOLS]
 
 
 def _ask_confirm(name, args):
@@ -156,4 +159,4 @@ def dispatch(name, args, ctx):
                     "error": _trace.truncate(err, 200) if err else None, "duration_ms": dt_ms})
 
 
-from . import session, geometry, booleans, transforms, variables, boundaries, excitations, analysis, mesh, parametrics, optimization, design, periodic, axialratio, sources, diagnostics, fields, history
+from . import session, geometry, booleans, transforms, variables, boundaries, excitations, analysis, mesh, parametrics, optimization, design, periodic, axialratio, sources, diagnostics, fields, history, toolsets

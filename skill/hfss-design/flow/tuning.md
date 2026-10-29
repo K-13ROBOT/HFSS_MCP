@@ -84,7 +84,7 @@ S11/VSWR 要求"整段带内 ≤ 某值"时,先分清是哪类问题再选旋钮
 - `analyze` 返回 `converged: false` 时不用校准,先加大 `max_passes` 重解。
 
 ## 公差与良率(设计达标之后、投板之前)
-`create_statistical` + `run_statistical` + `get_statistical_result`:给变量加公差分布做蒙特卡洛,给了 `spec_value` 直接算良率。
+`create_statistical` + `run_statistical` + `get_statistical_result`(扩展工具,`extra_tools(group='statistical')`):给变量加公差分布做蒙特卡洛,给了 `spec_value` 直接算良率。
 - 调参过程中不要做,设计还在变,算了也作废;对不达标的设计算良率没意义
 - 板厂的 ±公差通常是 3σ:±0.3mm → `std_dev='0.1mm'`;加工公差用 `Gaussian`,估最坏情况用 `Uniform`
 - **代价是 trials 次完整求解**,先预告耗时等用户确认;先 10~20 次看趋势,要可信的良率再上 50+

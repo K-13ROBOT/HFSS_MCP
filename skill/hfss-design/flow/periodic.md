@@ -1,5 +1,7 @@
 # 流程:周期单元(无限阵 / FSS / 超表面)
 
+(扩展工具,经 `extra_tools(group='periodic')` 看参数、`extra_tools(tool=..., arguments={...})` 调用)
+
 > 做无限大周期结构的**单元**仿真。注意**不要** `create_open_region`——
 > 那是孤立天线的开放边界,周期单元用主从边界 + Floquet 端口。
 

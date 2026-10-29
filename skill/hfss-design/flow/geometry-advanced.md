@@ -14,9 +14,11 @@
 ## 改已有对象的参数
 不想删了重建、或尺寸是写死在建模历史里的(多边形的点、布尔里被消耗的工具圆):
 `get_object_history` 看历史 → `set_history_props` 改单项 / `replace_in_history` 把写死的值批量换成变量。
+(扩展工具,经 `extra_tools(group='history')` 看参数、`extra_tools(tool=..., arguments={...})` 调用)
 **变量表里找不到的旋钮,常常就藏在这里。**
 
 ## 进阶边界 / 材料 / 网格(默认流程用不到)
+下面的边界和网格工具是扩展工具,分组 `boundary` / `mesh`,经 `extra_tools` 调。
 - sheet 的其它边界:`assign_perfect_h`(PMC)、`assign_finite_conductivity`(真实金属损耗,算效率/Q 时替代 PE)、
   `assign_impedance`(薄电阻片)、`assign_lumped_rlc`(集总 R/L/C)
 - 给已建实体换材料:`assign_material`

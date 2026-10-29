@@ -1,6 +1,6 @@
 """native server 隔离冒烟 —— 不启动 HFSS。
 
-起子进程跑真 stdio,验证:① list_tools 列出全部工具;② 无 active design 时调建模工具
+起子进程跑真 stdio,验证:① list_tools 列出核心工具(扩展工具不列);② 无 active design 时调建模工具
 干净返回 ok=False/"无 active design";③ stdio 往返无协议污染。
 """
 
@@ -34,7 +34,17 @@ async def main():
             print(f"[2] create_box(无 design) -> {payload}")
             assert payload.get("ok") is False, "应因无 active design 失败"
 
-            print("[3] stdio 往返无污染")
+            from tools.toolsets import EXTRA_TOOLS
+            assert "extra_tools" in names and not EXTRA_TOOLS.keys() & set(names), "扩展工具不该进 tools/list"
+            res = await session.call_tool("extra_tools", {"group": "eigenmode"})
+            payload = json.loads(res.content[0].text)
+            assert payload.get("ok") and [t["name"] for t in payload["tools"]] == ["create_eigenmode_setup", "get_eigenmodes"]
+            res = await session.call_tool("extra_tools", {"tool": "assign_mesh_length", "arguments": {"name": "m1"}})
+            payload = json.loads(res.content[0].text)
+            assert payload.get("ok") is False and "schema" in payload, "缺参数应回 schema"
+            print(f"[3] extra_tools:分组说明可取、缺参回 schema({payload['error']})")
+
+            print("[4] stdio 往返无污染")
             print("\nSMOKE OK")
 
 

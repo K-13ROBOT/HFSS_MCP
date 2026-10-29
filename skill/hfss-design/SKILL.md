@@ -76,6 +76,8 @@ HFSS 默认自适应网格一般可靠:`analyze` 报 `converged: true` 且没有
 - `new_design` / `delete_design` 除非用户明确要求,**永远别主动调**。
 
 ## 3. 通用约定
+- 周期边界、本征模、统计分析、进阶边界、网格加密、改建模历史这几组是**扩展工具**,不在工具列表里:
+  先 `extra_tools(group=...)` 看参数,再 `extra_tools(tool=..., arguments={...})` 调。流程卡里点名的这些工具都这样调。
 - 坐标/尺寸传**字符串**,带单位(`'10mm'`)或变量表达式(`'L1+1mm'`);对象名只用英文字母数字下划线。
 - 复杂结构先 `set_variable` 再用变量名建几何;建错用 `delete_object` 删掉重建,不要堆叠。
 - 材料用 HFSS 内置库(`'copper'`/`'FR4_epoxy'`/`'Vacuum'`);论文 εr/tanδ 和库里对不上就 `create_material` 按原值建。

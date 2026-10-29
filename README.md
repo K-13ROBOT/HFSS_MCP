@@ -6,14 +6,16 @@
 
 **连接全走 win32com 裸调 AEDT 原生脚本 API**(oDesktop/oEditor/oModule),**不依赖 PyAEDT**。实测 2019.2 和 2025.2 都通,PyAEDT/gRPC 够不到的老版本 HFSS(如 2019)也能驱动。
 
-**目录**:[为什么不依赖 PyAEDT](#为什么不依赖-pyaedt) · [能做什么](#能做什么89-个工具) · [skill 层](#skill-层三个) · [已验证](#已验证) · [安装](#安装) · [配置 & 用法](#配置--用法) · [用别的 MCP 客户端](#用别的-mcp-客户端) · [代码结构](#代码结构) · [已知的版本差异](#已知的版本差异)
+**目录**:[为什么不依赖 PyAEDT](#为什么不依赖-pyaedt) · [能做什么](#能做什么89-个工具其中-16-个按需加载) · [skill 层](#skill-层三个) · [已验证](#已验证) · [安装](#安装) · [配置 & 用法](#配置--用法) · [用别的 MCP 客户端](#用别的-mcp-客户端) · [代码结构](#代码结构) · [已知的版本差异](#已知的版本差异)
 
 ## 为什么不依赖 PyAEDT
 
 - 连接 = `win32com.Dispatch("Ansoft.ElectronicsDesktop." + version)`(ProgID 每个装机版本都注册),不卡 PyAEDT 版本下限,也不依赖 gRPC(2022R2+ 才有)。
 - 操作 = AEDT 原生脚本 API(宏录制那套),自 ~v15 稳定。
 
-## 能做什么(89 个工具)
+## 能做什么(89 个工具,其中 16 个按需加载)
+
+周期边界、本征模、统计分析、进阶边界、网格加密、改建模历史这 6 组共 16 个工具**不进工具列表**,经一个 `extra_tools` 入口按需查参数、调用:`tools/list` 下发 74 个,schema 每轮约省 4k token。分组定义在 `tools/toolsets.py`。
 
 | 域 | 能力 |
 |---|---|
@@ -202,13 +204,13 @@ server 是标准 MCP stdio,**任何 MCP 客户端都能挂**(Claude Desktop、Cl
 }
 ```
 
-**兼容性已实测**(用通用 MCP SDK 客户端,非 Claude Code):协议版本 2024-11-05 / 2025-03-26 / 2025-06-18 都能正确协商降级;89 个工具 schema 全合规;返回统一 `TextContent` + UTF-8 JSON;stdout 做了 fd 级隔离。**cwd 由客户端决定**——落在不可写目录(如系统目录)时,`projects/`、`exports/`、`traces/` 会自动退到 `~/.hfss-agent/`,不会像以前那样在 initialize 之前就崩。
+**兼容性已实测**(用通用 MCP SDK 客户端,非 Claude Code):协议版本 2024-11-05 / 2025-03-26 / 2025-06-18 都能正确协商降级;工具 schema 全合规;返回统一 `TextContent` + UTF-8 JSON;stdout 做了 fd 级隔离。**cwd 由客户端决定**——落在不可写目录(如系统目录)时,`projects/`、`exports/`、`traces/` 会自动退到 `~/.hfss-agent/`,不会像以前那样在 initialize 之前就崩。
 
 **长任务不再阻塞协议**:所有 COM 调用跑在一个专用线程上,事件循环全程空闲——实测 `analyze` 求解期间 `tools/list` 连续 9 次全部 <0.01s 返回。客户端的 ping/keepalive 不会超时,不会误判 server 已死而杀进程。但注意**两点仍然成立**:① `analyze` 这个请求本身就是几分钟,设了硬性单请求超时的客户端仍会在这一个调用上超时;② 求解**无法中途中止**(阻塞 COM 调用没有中断点),客户端发的 cancel 会被应答但求解照跑,后续调用排在它后面。
 
 换客户端会**丢两样 Claude Code 专属能力**,知道就行:
 
-1. **三个 skill 都不会自动加载**——那是 Claude 的 skill 机制,别的客户端不读。89 个工具照样能调,但丢了"怎么正确用"的纪律([skill 层](#skill-层三个)那一节的全部内容)。
+1. **三个 skill 都不会自动加载**——那是 Claude 的 skill 机制,别的客户端不读。工具照样能调,但丢了"怎么正确用"的纪律([skill 层](#skill-层三个)那一节的全部内容)。
    - 变通:把 `skill/hfss-design/SKILL.md` 放进那个 agent 的 system prompt 当指南;要查文献或还原叠层再补 `skill/hfss-search/` 或 `skill/hfss-stackup/` 的 SKILL.md。
    - `design/` 卡片库不受影响——它由 `search_designs` / `read_design_card` 经 MCP 提供,任何客户端都取得到;`knowledge/` 和 `papers/` 则要靠那个 agent 自己有文件读取能力。
 2. **确认门**——如上,stdio 下进程内确认已关。客户端若没有工具授权 UI,`analyze`/扫参/优化会**直接跑、不问你**。用支持 MCP 工具授权的客户端,或自己留意别误触。
@@ -220,7 +222,8 @@ hfss_mcp_server.py   MCP stdio 入口:常驻 ctx 持有 COM 句柄(oDesktop/oPro
 tools/__init__.py    工具注册表(@tool 装饰器)+ dispatch:前置校验、确认门、trace 落盘
 tools/*.py           按域分文件:session / geometry / booleans / transforms / variables /
                      boundaries / excitations / sources / analysis / axialratio / fields /
-                     mesh / parametrics / optimization / periodic / diagnostics / design
+                     mesh / parametrics / optimization / periodic / diagnostics / design / history
+tools/toolsets.py   按需加载的扩展分组 + extra_tools 入口(这些工具不进 tools/list)
 model_state.py       Agent 侧的模型状态镜像(对象/变量/边界/激励/setup),供 design_summary 等用
 install.py           打印/写入 MCP 配置 + 安装 skill(不改全局 ~/.claude.json)
 smoke_mcp.py         不启 HFSS 的 stdio 冒烟:工具能否注册、协议往返是否干净

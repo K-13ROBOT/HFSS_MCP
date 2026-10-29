@@ -1,5 +1,7 @@
 # 流程:本征模求解(不要端口)
 
+(扩展工具,经 `extra_tools(group='eigenmode')` 看参数、`extra_tools(tool=..., arguments={...})` 调用)
+
 > 直接解结构自身的谐振频率与 Q。**要 S 参数/匹配/方向图的一律不走这条**,
 > 走 [s-parameters.md](s-parameters.md)——本征模不产出这些。
 
