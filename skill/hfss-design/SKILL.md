@@ -23,7 +23,7 @@ description: >-
 | 跑 S 参数 / 完整求解一个设计 | [`flow/s-parameters.md`](flow/s-parameters.md) | 求解前 bbox + validate 两道自检不许跳 |
 | 取远场(增益/轴比/HPBW/前后比) | [`flow/farfield.md`](flow/farfield.md) | **多端口先 `set_port_excitation` 设幅相**,否则算的是同相馈电 |
 | 非标准馈电(缝隙/近耦合/CPW/差分/多层) | [`flow/feeding.md`](flow/feeding.md) | **端口 sheet 绝不赋 PE** |
-| 指标不达标要调(扫参/灵敏度/公差/优化) | [`flow/tuning.md`](flow/tuning.md) | **调参前先用更严的网格校准一次**;多谐振结构第一次不达标就先看电流 |
+| 指标不达标要调(扫参/灵敏度/扰动法/公差/优化) | [`flow/tuning.md`](flow/tuning.md) | **调参前先用更严的网格校准一次**;多谐振结构第一次不达标就先看电流 |
 | 指标不对但**不知道为什么** | [`flow/diagnose-current.md`](flow/diagnose-current.md) | 采样线按 `get_current_along_path` 描述的要求画(非模型、开口、避开馈电点) |
 | 腔体/滤波器/DRA,要谐振频率与 Q | [`flow/eigenmode.md`](flow/eigenmode.md) | **design 必须建成 Eigenmode 类型**,不要端口 |
 | 无限阵 / FSS / 超表面单元 | [`flow/periodic.md`](flow/periodic.md) | **不要 `create_open_region`** |
@@ -48,6 +48,8 @@ description: >-
 - **调不动时按"轮数 + 未达标项有没有少"数,不按"方向对不对"判**("方向对、力度不够"是最贵的自我说服):
   - **一轮** = 改了设计变量之后的任何一次求解(单次 analyze、参扫、优化器、自己写脚本跑的都算)。
   - **每轮在回复里列出未达标项和当前数值**(`check_design_targets` 或任何等价的逐项对表都行)。
+    匹配类指标(S11/VSWR 带内 ≤ 某值)不许只报最差点,每个频段还要报**反射环半径和环心阻抗**
+    (`get_input_metrics(bands=...)` 的 `loop_check`):最差点会把"整段偏了"误读成"边频掉了"。
   - **连续两轮未达标项没少一项 → 停**,转 `flow/diagnose-current.md` 看机理,或用灵敏度(`flow/tuning.md`)查该动哪个变量。
 - **诊断完按机理改过,再两轮仍没少项 → 停下来交给用户**:报各项现状、已排除的假设、可选方向(换拓扑/松指标/继续投机时由用户定)。
 - **拿不准论文结构/标注 → 问用户**,别猜着建。

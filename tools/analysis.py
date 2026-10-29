@@ -52,7 +52,9 @@ def _to_unit_str(freq):
                 "frequencies": {"type": "array", "items": {"type": "string"},
                                 "description": "可选:多频点自适应(如 ['1.52GHz','1.672GHz']),每点都用 max_delta_s 判收敛,"
                                                "此时 frequency 被忽略。双频/多频天线、尤其含窄带高Q 模时用它——"
-                                               "单频自适应只保证该频点收敛,离它远的窄谐振位置可能随网格漂移。"},
+                                               "单频自适应只保证该频点收敛,离它远的窄谐振位置可能随网格漂移。"
+                                               "**坑**:AEDT 2025.2 实测端口删到零个后再建端口会把它静默冲成 "
+                                               "Single 5GHz;analyze / run_* 会拦下,删端口后要自己把 setup 改回多频。"},
             },
             "required": ["name", "frequency"],
         },
@@ -321,19 +323,31 @@ def delete_setup(ctx, names=None, confirm=False):
     "function": {
         "name": "analyze",
         "description": ("运行求解(阻塞,几秒到几分钟)。调用前必须已建 setup + sweep + 至少一个端口。"
-                        "完成后用 get_s_parameters 取 S 参数。"),
+                        "完成后用 get_s_parameters 取 S 参数。"
+                        "求解前自动查自适应频点:setup 是 Single 5GHz(AEDT 静默回退的特征值)就拒绝求解——"
+                        "已实测的入口:端口删到零个后再建端口(2025.2)、2019 用了 2025 的多频写法;复制 design、删一个端口不会。"),
         "parameters": {
             "type": "object",
-            "properties": {"setup": {"type": "string", "description": "要跑的 setup 名;不传则用第一个"}},
+            "properties": {"setup": {"type": "string", "description": "要跑的 setup 名;不传则用第一个"},
+                           "allow_5ghz": {"type": "boolean", "default": False,
+                                          "description": "确实要在 5 GHz 单频自适应时传 true,跳过回退检查"}},
         },
     },
 })
-def analyze(ctx, setup=None):
+def analyze(ctx, setup=None, allow_5ghz=False):
     import time
     oDesign = ctx["oDesign"]
     setup, err = resolve_setup(ctx, setup)
     if err:
         return err
+    from . import setup_freqs
+    name = setup.split(":")[0].strip()   # 也接受 "Setup1 : Sw1"
+    info = setup_freqs(oDesign).get(name)
+    if info and info[0] == "Single" and info[1].replace(" ", "") == "5GHz" and not allow_5ghz:
+        return {"ok": False, "error": f"{name} 是 Single 5GHz 自适应 —— 多半是多频 setup 被 AEDT 静默冲掉了,拒绝求解",
+                "hint": ("已实测的入口:端口删到零个后再建端口(2025.2)、2019 用了 2025 多频写法。"
+                         "用 delete_setup + create_setup(frequencies=[...]) 改回(注意参扫按内部 ID 引用 setup,要重建参扫),"
+                         "或脚本 EditSetup 恢复;确实要 5 GHz 就传 allow_5ghz=true")}
     print(f"  [Solving] {setup} ...")
     # 求解前先导一份收敛表:求解后若与之一字不差,说明 HFSS 复用了缓存解、没重算。
     # (对没解过的 setup 导,只得到 Completed: N/A,不会在消息窗口留 error —— 2019.2 实测)
@@ -564,18 +578,26 @@ def _report_to_csv(oDesign, soln, exprs, csv_path):
     "function": {
         "name": "get_input_metrics",
         "description": ("从复数 S(port,port) 取天线输入指标:VSWR、输入阻抗 Zin(R+jX 欧姆)、"
-                        "阻抗带宽(默认 VSWR<2)。比 get_s_parameters 多了 Zin/VSWR。调用前必须已 analyze。"),
+                        "阻抗带宽(默认 VSWR<2)。比 get_s_parameters 多了 Zin/VSWR。调用前必须已 analyze。"
+                        "传 bands 时对每个频段做**反射环体检**:带内复 Γ 的最小包围圆半径(带宽够不够)、"
+                        "环心阻抗 Zc(偏到哪)、带内最差点、离该频段最近的达标连续段,并给 verdict:"
+                        "pass / shifted(达标段够宽但错位,先移谐振频率)/ matching(环够小只是偏了,调匹配)/ "
+                        "bandwidth(环太大,匹配救不回来)/ marginal(理想匹配也没余量)。"),
         "parameters": {
             "type": "object",
             "properties": {
                 "setup": {"type": "string"}, "sweep": {"type": "string"}, "port": {"type": "string"},
                 "z0": {"type": "number", "default": 50, "description": "参考阻抗 Ω,默认 50"},
                 "vswr_max": {"type": "number", "default": 2.0, "description": "带宽判据 VSWR<此值,默认 2"},
+                "bands": {"type": "array", "items": {"type": "array", "items": {"type": "number"}},
+                          "description": "要体检的频段 [[f_lo, f_hi], ...],单位 GHz,如 [[17.7,21.2],[27.5,31]]"},
+                "target_db": {"type": "number", "default": -10,
+                              "description": "频段内 |S11| 目标(dB),体检判据用,默认 -10"},
             },
         },
     },
 })
-def get_input_metrics(ctx, setup=None, sweep=None, port=None, z0=50, vswr_max=2.0):
+def get_input_metrics(ctx, setup=None, sweep=None, port=None, z0=50, vswr_max=2.0, bands=None, target_db=-10):
     import math
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
@@ -625,6 +647,8 @@ def get_input_metrics(ctx, setup=None, sweep=None, port=None, z0=50, vswr_max=2.
             freqs.append(f0); re.append(rr); im.append(ii)
     if not freqs:
         return {"ok": False, "error": "CSV 解析不出数值", "csv_header": rows[0]}
+    if "MHz" in rows[0][0]:
+        freqs = [f / 1000 for f in freqs]
 
     mags = [math.hypot(a, b) for a, b in zip(re, im)]
     vswr = [((1 + g) / (1 - g)) if g < 1 else float("inf") for g in mags]
@@ -635,7 +659,7 @@ def get_input_metrics(ctx, setup=None, sweep=None, port=None, z0=50, vswr_max=2.
     bw_low, bw_high = (inb[0], inb[-1]) if inb else (None, None)
     center = (bw_low + bw_high) / 2 if inb else None
     span = (bw_high - bw_low) if inb else None
-    return {"ok": True, "setup": setup, "sweep": sweep, "summary": {
+    out = {"ok": True, "setup": setup, "sweep": sweep, "summary": {
         "port": port, "z0_ohm": z0,
         "resonant_freq": round(freqs[i0], 4),
         "at_resonance": {
@@ -650,6 +674,80 @@ def get_input_metrics(ctx, setup=None, sweep=None, port=None, z0=50, vswr_max=2.
                       "fractional_pct": round(span / center * 100, 2) if center else None,
                       "matched": bw_low is not None},
     }}
+    if bands:
+        out["summary"]["loop_check"] = [_loop_check(freqs, re, im, b, z0, target_db) for b in bands]
+    return out
+
+
+def _min_circle(pts):
+    """复平面点集的最小包围圆(Welzl 增量法),返回 (圆心, 半径)。"""
+    def circ2(p, q):
+        return (p + q) / 2, abs(p - q) / 2
+
+    def circ3(p, q, s):
+        b, c = q - p, s - p
+        d = 2 * (b.real * c.imag - b.imag * c.real)
+        if abs(d) < 1e-15:   # 共线:取最远两点
+            return max((circ2(p, q), circ2(p, s), circ2(q, s)), key=lambda t: t[1])
+        ux = (c.imag * abs(b) ** 2 - b.imag * abs(c) ** 2) / d
+        uy = (b.real * abs(c) ** 2 - c.real * abs(b) ** 2) / d
+        o = p + complex(ux, uy)
+        return o, abs(o - p)
+
+    c, r = pts[0], 0.0
+    for i, p in enumerate(pts):
+        if abs(p - c) > r + 1e-12:
+            c, r = p, 0.0
+            for j in range(i):
+                q = pts[j]
+                if abs(q - c) > r + 1e-12:
+                    c, r = circ2(p, q)
+                    for k in range(j):
+                        if abs(pts[k] - c) > r + 1e-12:
+                            c, r = circ3(p, q, pts[k])
+    return c, r
+
+
+def _loop_check(freqs, re, im, band, z0, target_db):
+    """一个频段的反射环体检:环半径判带宽,环心判匹配。"""
+    import math
+    lo, hi = band
+    pts = [(f, complex(a, b)) for f, a, b in zip(freqs, re, im) if lo <= f <= hi]
+    if len(pts) < 2:
+        return {"band_GHz": [lo, hi], "error": f"频段内只有 {len(pts)} 个扫频点,扩大扫频或加密"}
+    c, r = _min_circle([g for _, g in pts])
+    fw, gw = max(pts, key=lambda t: abs(t[1]))
+    g_t = 10 ** (target_db / 20)
+    # 全扫频里 ≤ 目标的连续段,取离本频段最近的那段:够宽但错位 = 频率没对准,不是带宽/匹配问题
+    segs, cur = [], None
+    for f, a, b in zip(freqs, re, im):
+        if math.hypot(a, b) <= g_t:
+            cur = [cur[0], f] if cur else [f, f]
+        elif cur:
+            segs.append(cur); cur = None
+    if cur:
+        segs.append(cur)
+    gap = lambda s: max(lo - s[1], s[0] - hi, 0)
+    segs = [s for s in segs if gap(s) <= hi - lo]   # 离太远的是别的频段,不算
+    near = min(segs, key=gap) if segs else None
+    if abs(gw) <= g_t:
+        verdict = "pass"
+    elif near and near[1] - near[0] >= 0.95 * (hi - lo):
+        verdict = "shifted"
+    elif r >= g_t:
+        verdict = "bandwidth"
+    elif r > 0.7 * g_t:
+        verdict = "marginal"
+    else:
+        verdict = "matching"
+    zc = z0 * (1 + c) / (1 - c) if abs(1 - c) > 1e-12 else complex(float("inf"), 0)
+    return {"band_GHz": [lo, hi], "n_points": len(pts),
+            "radius": round(r, 4), "radius_dB": round(20 * math.log10(r), 2) if r > 0 else None,
+            "center_gamma": [round(c.real, 4), round(c.imag, 4)],
+            "Zc_ohm": [round(zc.real, 1), round(zc.imag, 1)],
+            "worst_dB": round(20 * math.log10(abs(gw)), 2), "worst_freq_GHz": round(fw, 4),
+            "nearest_segment_GHz": [round(near[0], 4), round(near[1], 4)] if near else None,
+            "verdict": verdict}
 
 
 _POL = {"total": "Total", "lhcp": "LHCP", "rhcp": "RHCP", "theta": "Theta", "phi": "Phi"}

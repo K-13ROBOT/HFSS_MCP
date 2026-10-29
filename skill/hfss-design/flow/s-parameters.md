@@ -28,7 +28,8 @@
 8. `analyze`。返回值里的 `convergence` 是当前这组变量的收敛体检;**有 `warnings` 就停,别往下取数**。
    不是用 `analyze` 求解的(自己写脚本),事后调 `get_convergence(setup)` 补查。
 9. **读消息窗口**:`get_messages(errors_only=true)`。端口阻抗偏离、不收敛、解被作废只写在这里。
-10. 取结果:`get_s_parameters`(S11/谐振/-10dB 带宽);`get_input_metrics`(VSWR、输入阻抗、阻抗带宽)。
+10. 取结果:`get_s_parameters`(S11/谐振/-10dB 带宽);`get_input_metrics`(VSWR、输入阻抗、阻抗带宽;
+    传 `bands` 做反射环体检)。
 
 ## 这张卡做完去哪
 - 要增益/轴比/方向图 → `farfield.md`

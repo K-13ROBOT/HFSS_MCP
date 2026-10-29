@@ -124,3 +124,25 @@ N 重旋转对称结构同理:各口 `S(Pk,Pk)` 的散布就是收敛误差的�
 ## 删 setup 再同名重建,原来的参扫接不上
 参扫按内部 ID 引用 setup,不按名字。`delete_setup` 后同名重建,原参扫再跑**不会解任何东西**
 (2019.2 实测:返回成功、耗时 0.1 秒,没有求解)。⇒ 重建 setup 后必须**新建参扫**指向它。
+
+## 多频自适应 setup 的脚本写法分版本,写错会静默退回 5 GHz
+- 2025.2:`"SolveType:=", "MultiFrequency", ["NAME:MultipleAdaptiveFreqsSetup", ["NAME:AdaptAt", "Frequency:=", "19.5GHz", "Delta:=", 0.02], ...]`。
+- 2019.2:`"AdaptMultipleFreqs:=", True, ["NAME:MultipleAdaptiveFreqsSetup", "19.5GHz:=", [0.02], ...]`。
+- 把 2025 写法用在 2019 上,`InsertSetup` 照样返回成功,但工程里存成 `AdaptMultipleFreqs=false, Frequency='5GHz'`,
+  网格只在 5 GHz 自适应。毫米波模型这样解出来的 S11 能差十几 dB,看起来像"模型建错了"(2019.2 实测)。
+- ⇒ 跨版本迁移工程后,先读回工程文件里的 setup 段(`AdaptMultipleFreqs` / `Frequency`)再求解,别只看函数有没有报错。
+- **2025.2 的另一个入口:端口删到零个,之后再建端口**。分离实验(2025.2,双口 lumped port 模型,逐步读回 setup):
+  | 操作 | 多频 setup |
+  |---|---|
+  | 复制 design | 不变 |
+  | 删一个端口(还剩一个) / 有端口时新建端口 | 不变 |
+  | **删到零个端口** | `GetPropertyValue` 读不出、`EditSetup` 抛"发生意外" |
+  | **零端口后再建端口** | **全部变成 `Single 5GHz`**,不报错 |
+  之后照样"收敛",只是在 5 GHz 上自适应;连跑几轮表现为"同参数两次求解差很多",极易误判成 setup/网格不可靠。
+  典型触发:"变量改了,删光端口按新坐标重建积分线"的脚本。⇒ 重建端口时**先建新的再删旧的**,或删完重建后无条件 `EditSetup` 恢复
+  (零端口期间改不了,必须等端口建好)。
+- ⇒ **求解前自动守卫,别靠记性**:读回 `GetPropertyValue("HfssTab","AnalysisSetup:<name>","Solution Freq Type")`
+  与 `"Solution Freq"`,不是 Multiple/预期频点就拒绝求解;重建端口的脚本末尾无条件 `EditSetup` 恢复。
+  MCP 的 `analyze` / `run_*` 求解前已内置这道检查(`allow_5ghz=true` 放行);自己写的 COM 脚本要自己查。
+- 顺带:一个插值扫频里放两个不相邻子频段(SweepRanges/Subrange),插值器仍把首尾当一整段拟合,
+  基点落进带间空白,不省时间 ⇒ 双频带用**两个独立的插值扫频**。

@@ -62,6 +62,23 @@ def resolve_setup(ctx, setup=None):
     return setups[0], None
 
 
+def setup_freqs(oDesign):
+    """{setup: (Solution Freq Type, Solution Freq)},如 ('Multiple', '19.5GHz, 29.25GHz')、('Single', '5GHz')。
+    多频 setup 会被 AEDT 静默冲成 Single 5GHz(见 skill _solving.md),analyze / run_* 求解前用它查。"""
+    out = {}
+    try:
+        names = [str(x) for x in (oDesign.GetModule("AnalysisSetup").GetSetups() or [])]
+    except Exception:
+        return out
+    for n in names:
+        try:
+            out[n] = tuple(str(oDesign.GetPropertyValue("HfssTab", "AnalysisSetup:" + n, k))
+                           for k in ("Solution Freq Type", "Solution Freq"))
+        except Exception:
+            pass
+    return out
+
+
 def get_schemas():
     return [t["schema"] for t in TOOLS.values()]
 
@@ -102,6 +119,15 @@ def dispatch(name, args, ctx):
                     "args": _trace.truncate(args), "ok": False, "error": "no_active_design",
                     "duration_ms": 0.0})
         return result
+
+    # Optimetrics 批量求解(参扫/优化/灵敏度/统计)底下也是自适应:任何 setup 处在 Single 5GHz 回退态就先拦下,
+    # 免得跑完一整批才发现网格是在 5 GHz 上自适应的。analyze 自己查(带 allow_5ghz 开关)。
+    if name.startswith("run_") and ctx.get("oDesign") is not None:
+        bad = [n for n, v in setup_freqs(ctx["oDesign"]).items() if v[0] == "Single" and v[1].replace(" ", "") == "5GHz"]
+        if bad:
+            return {"ok": False, "error": f"setup {bad} 是 Single 5GHz 自适应 —— 多半是多频 setup 被 AEDT 静默冲掉了,拒绝批量求解",
+                    "hint": ("已实测的入口:端口删到零个后再建端口(2025.2)、2019 用了 2025 多频写法。"
+                             "先把 setup 改回多频再跑;确实要 5 GHz,先单独 analyze(allow_5ghz=true)。")}
 
     if name in REQUIRES_CONFIRM and not _AUTOCONFIRM:
         if not _ask_confirm(name, args):
