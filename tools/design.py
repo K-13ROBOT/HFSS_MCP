@@ -85,30 +85,12 @@ def _as_list(x):
 
 
 @tool({"type": "function", "function": {
-    "name": "list_design_cards",
-    "description": "列出设计卡片库里所有卡(辅助设计用)。返回每张卡的拓扑/频段/基板/馈电/极化/报告性能摘要 + 卡片名(用 read_design_card 看公式细节)。",
-    "parameters": {"type": "object", "properties": {}}}})
-def list_design_cards(ctx):
-    d, cands = _design_dir()
-    if not d:
-        return {"ok": False, "error": "找不到设计卡片目录", "searched": cands}
-    cards = _load_cards(d)
-    return {"ok": True, "dir": d, "n_cards": len(cards),
-            "cards": [{"card": c["card"], "path": c["path"],
-                       "topology": c["fm"].get("topology", c["card"]),
-                       "freq_ghz": [c["fm"].get("freq_ghz_min"), c["fm"].get("freq_ghz_max")],
-                       "eps_r": c["fm"].get("eps_r"), "polarization": c["fm"].get("polarization"),
-                       "feed": _as_list(c["fm"].get("feed")), "source": c["fm"].get("source")}
-                      for c in cards]}
-
-
-@tool({"type": "function", "function": {
     "name": "read_design_card",
     "description": ("读一张设计卡片的完整正文(闭式公式 / λ 归一化尺寸 / 设计自由度 / 出处)。"
-                    "search_designs / list_design_cards 命中后用它拿细节,再按目标频率缩放算起手尺寸。"
+                    "search_designs 命中后用它拿细节,再按目标频率缩放算起手尺寸。"
                     "**卡片内容通过本工具返回,不需要客户端自带文件读取能力。**"),
     "parameters": {"type": "object", "properties": {
-        "card": {"type": "string", "description": "卡片名(不含 .md),取自 search_designs/list_design_cards 返回的 card 字段"},
+        "card": {"type": "string", "description": "卡片名(不含 .md),取自 search_designs 返回的 card 字段"},
         "max_chars": {"type": "integer", "default": 20000,
                       "description": "最多返回多少字符,默认 20000;超长会截断并标注 truncated"}},
         "required": ["card"]}}})

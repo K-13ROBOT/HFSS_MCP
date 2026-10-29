@@ -9,7 +9,7 @@
 3. 取数:
    - 整条方向图(增益 vs 角度)→ `get_radiation_pattern`;CP 传 `polarization='lhcp'/'rhcp'`
    - 轴比 vs 频率 + 3dB 轴比带宽 → `get_axial_ratio`(需要存场离散扫频,见 s-parameters 第 6 步)
-   - 参扫各组合的标量指标 → `get_parametric_gain` / `_axial_ratio` / `_front_to_back` / `_hpbw` / `_cross_pol_isolation`
+   - 参扫各组合的标量指标 → `get_parametric_farfield(metrics=[...])`(gain / axial_ratio / front_to_back / hpbw / cross_pol,一次可取多个)
    - 看自适应频点之外的频点:取那条存场离散扫频,用 `freq` 指定频点(必须是扫频里有的点)
 
 **先确认自适应频率落在谐振上**:`LastAdaptive` 取的是 setup 频率那一点,谐振移走了 realized gain 会因失配塌掉

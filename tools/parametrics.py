@@ -125,7 +125,7 @@ def create_parametric_sweep(ctx, name, variables, setup=None, save_fields=False)
     "function": {
         "name": "run_parametric_sweep",
         "description": ("运行参数扫描。**阻塞**,组合多很久。调用前须 create_parametric_sweep。"
-                        "跑完用 get_parametric_results / get_parametric_gain 等取各组合指标。"),
+                        "跑完用 get_parametric_results / get_parametric_farfield 取各组合指标。"),
         "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
     },
 })
@@ -491,92 +491,60 @@ def _ff_metric(ctx, parametric, expr, sphere, setup, sweep, phi=None, reduce_fn=
     return out, fails
 
 
-@tool({"type": "function", "function": {
-    "name": "get_parametric_gain",
-    "description": "取参扫各组合远场峰值增益(dB)。须 save_fields=True 跑参扫 + Infinite Sphere。",
-    "parameters": {"type": "object", "properties": {
-        "parametric": {"type": "string"}, "sphere": {"type": "string", "default": "Sphere1"},
-        "setup": {"type": "string"}, "sweep": {"type": "string", "default": "LastAdaptive"},
-        "gain_type": {"type": "string", "enum": ["realized", "total"], "default": "realized"},
-        "polarization": {"type": "string", "enum": ["total", "lhcp", "rhcp", "theta", "phi"], "default": "total"}},
-        "required": ["parametric"]}}})
-def get_parametric_gain(ctx, parametric, sphere="Sphere1", setup=None, sweep="LastAdaptive",
-                        gain_type="realized", polarization="total"):
-    out, fails = _ff_metric(ctx, parametric, _gain_expr(gain_type, polarization), sphere, setup, sweep)
+def _broadside(pts, tol):
+    return [v for i, v in pts if i and abs(i[0]) < tol]
+
+
+def _m_gain(ctx, a):
+    out, fails = _ff_metric(ctx, a["parametric"], _gain_expr(a["gain_type"], a["polarization"]),
+                            a["sphere"], a["setup"], a["sweep"])
     if out is None:
-        return {"ok": False, "error": f"远场增益报告失败: {fails}"}
-    res = []
-    for var, pts, pk in out:
-        bs = [v for i, v in pts if i and abs(i[0]) < 1e-3]
-        res.append({"variation": var, "peak_gain_dB": round(pk, 2) if pk is not None else None,
-                    "broadside_gain_dB": round(max(bs), 2) if bs else None})
-    return _with_fails({"ok": True, "parametric": parametric, "gain_type": gain_type,
-                        "polarization": polarization, "n_variations": len(res), "results": res}, fails)
+        return None, f"远场增益报告失败: {fails}"
+    rows = []
+    for _, pts, pk in out:
+        bs = _broadside(pts, 1e-3)
+        rows.append({"peak_gain_dB": round(pk, 2) if pk is not None else None,
+                     "broadside_gain_dB": round(max(bs), 2) if bs else None})
+    return rows, fails
 
 
-@tool({"type": "function", "function": {
-    "name": "get_parametric_axial_ratio",
-    "description": "取参扫各组合最小轴比 AR(dB),CP 天线核心。AR<3dB 为良好 CP。须 save_fields + Sphere。",
-    "parameters": {"type": "object", "properties": {
-        "parametric": {"type": "string"}, "sphere": {"type": "string", "default": "Sphere1"},
-        "setup": {"type": "string"}, "sweep": {"type": "string", "default": "LastAdaptive"},
-        "threshold_dB": {"type": "number", "default": 3.0}}, "required": ["parametric"]}}})
-def get_parametric_axial_ratio(ctx, parametric, sphere="Sphere1", setup=None, sweep="LastAdaptive", threshold_dB=3.0):
-    out, fails = _ff_metric(ctx, parametric, "dB(AxialRatioValue)", sphere, setup, sweep, reduce_fn=min)
+def _m_axial_ratio(ctx, a):
+    out, fails = _ff_metric(ctx, a["parametric"], "dB(AxialRatioValue)", a["sphere"], a["setup"], a["sweep"],
+                            reduce_fn=min)
     if out is None:
-        return {"ok": False, "error": f"轴比报告失败: {fails}"}
-    res = []
-    for var, pts, best in out:
-        bs = [v for i, v in pts if i and abs(i[0]) < 1e-3]
-        res.append({"variation": var, "best_AR_dB": round(best, 2) if best is not None else None,
-                    "broadside_AR_dB": round(min(bs), 2) if bs else None,
-                    "is_CP_at_broadside": bool(bs and min(bs) < threshold_dB)})
-    return _with_fails({"ok": True, "parametric": parametric, "n_variations": len(res), "results": res}, fails)
+        return None, f"轴比报告失败: {fails}"
+    rows = []
+    for _, pts, best in out:
+        bs = _broadside(pts, 1e-3)
+        rows.append({"best_AR_dB": round(best, 2) if best is not None else None,
+                     "broadside_AR_dB": round(min(bs), 2) if bs else None,
+                     "is_CP_at_broadside": bool(bs and min(bs) < a["threshold_dB"])})
+    return rows, fails
 
 
-@tool({"type": "function", "function": {
-    "name": "get_parametric_front_to_back",
-    "description": "取参扫各组合前后比(broadside θ≈0 − 背向 θ≈180 增益,dB)。须 save_fields + Sphere。",
-    "parameters": {"type": "object", "properties": {
-        "parametric": {"type": "string"}, "sphere": {"type": "string", "default": "Sphere1"},
-        "setup": {"type": "string"}, "sweep": {"type": "string", "default": "LastAdaptive"},
-        "gain_type": {"type": "string", "enum": ["realized", "total"], "default": "realized"},
-        "polarization": {"type": "string", "enum": ["total", "lhcp", "rhcp", "theta", "phi"], "default": "total"}},
-        "required": ["parametric"]}}})
-def get_parametric_front_to_back(ctx, parametric, sphere="Sphere1", setup=None, sweep="LastAdaptive",
-                                 gain_type="realized", polarization="total"):
-    out, fails = _ff_metric(ctx, parametric, _gain_expr(gain_type, polarization), sphere, setup, sweep, phi="0deg")
+def _m_front_to_back(ctx, a):
+    out, fails = _ff_metric(ctx, a["parametric"], _gain_expr(a["gain_type"], a["polarization"]),
+                            a["sphere"], a["setup"], a["sweep"], phi="0deg")
     if out is None:
-        return {"ok": False, "error": f"前后比报告失败: {fails}"}
-    res = []
-    for var, pts, _ in out:
-        front = [v for i, v in pts if i and abs(i[0]) < 2]
+        return None, f"前后比报告失败: {fails}"
+    rows = []
+    for _, pts, _ in out:
+        front = _broadside(pts, 2)
         back = [v for i, v in pts if i and abs(i[0] - 180) < 2]
-        res.append({"variation": var,
-                    "front_to_back_dB": round(max(front) - max(back), 2) if front and back else None})
-    return _with_fails({"ok": True, "parametric": parametric, "n_variations": len(res), "results": res}, fails)
+        rows.append({"front_to_back_dB": round(max(front) - max(back), 2) if front and back else None})
+    return rows, fails
 
 
-@tool({"type": "function", "function": {
-    "name": "get_parametric_hpbw",
-    "description": "取参扫各组合半功率波束宽度 HPBW(度,指定 phi 切面)。须 save_fields + Sphere。",
-    "parameters": {"type": "object", "properties": {
-        "parametric": {"type": "string"}, "phi_cut": {"type": "string", "default": "0deg"},
-        "sphere": {"type": "string", "default": "Sphere1"}, "setup": {"type": "string"},
-        "sweep": {"type": "string", "default": "LastAdaptive"},
-        "gain_type": {"type": "string", "enum": ["realized", "total"], "default": "realized"},
-        "polarization": {"type": "string", "enum": ["total", "lhcp", "rhcp", "theta", "phi"], "default": "total"}},
-        "required": ["parametric"]}}})
-def get_parametric_hpbw(ctx, parametric, phi_cut="0deg", sphere="Sphere1", setup=None, sweep="LastAdaptive",
-                        gain_type="realized", polarization="total"):
-    out, fails = _ff_metric(ctx, parametric, _gain_expr(gain_type, polarization), sphere, setup, sweep, phi=phi_cut)
+def _m_hpbw(ctx, a):
+    out, fails = _ff_metric(ctx, a["parametric"], _gain_expr(a["gain_type"], a["polarization"]),
+                            a["sphere"], a["setup"], a["sweep"], phi=a["phi_cut"])
     if out is None:
-        return {"ok": False, "error": f"HPBW 报告失败: {fails}"}
-    res = []
-    for var, pts, _ in out:
+        return None, f"HPBW 报告失败: {fails}"
+    rows = []
+    for _, pts, _ in out:
         tg = sorted([(i[0], v) for i, v in pts if i], key=lambda t: t[0])
         if not tg:
-            res.append({"variation": var, "HPBW_deg": None}); continue
+            rows.append({"HPBW_deg": None}); continue
         pi = max(range(len(tg)), key=lambda k: tg[k][1]); pkt, pkg = tg[pi]; half = pkg - 3.0
         left = tg[0][0]
         for k in range(pi, 0, -1):
@@ -586,40 +554,80 @@ def get_parametric_hpbw(ctx, parametric, phi_cut="0deg", sphere="Sphere1", setup
         for k in range(pi, len(tg) - 1):
             if tg[k][1] >= half > tg[k + 1][1]:
                 right = tg[k][0] + (tg[k + 1][0] - tg[k][0]) * (tg[k][1] - half) / (tg[k][1] - tg[k + 1][1]); break
-        res.append({"variation": var, "peak_gain_dB": round(pkg, 2), "HPBW_deg": round(abs(right - left), 1)})
-    return _with_fails({"ok": True, "parametric": parametric, "phi_cut": phi_cut,
-                        "n_variations": len(res), "results": res}, fails)
+        rows.append({"HPBW_deg": round(abs(right - left), 1), "HPBW_phi_cut": a["phi_cut"]})
+    return rows, fails
+
+
+def _m_cross_pol(ctx, a):
+    co = a["co_pol"]
+    cx = _CROSS.get(co)
+    if not cx:
+        return None, f"cross_pol 需要 co_pol(lhcp/rhcp/theta/phi),收到: {co}"
+    co_out, f1 = _ff_metric(ctx, a["parametric"], _gain_expr(a["gain_type"], co),
+                            a["sphere"], a["setup"], a["sweep"], phi="0deg")
+    if co_out is None:
+        return None, f"co 报告失败: {f1}"
+    cx_out, f2 = _ff_metric(ctx, a["parametric"], _gain_expr(a["gain_type"], cx),
+                            a["sphere"], a["setup"], a["sweep"], phi="0deg")
+    if cx_out is None:
+        return None, f"cross 报告失败: {f2}"
+    rows = []
+    for (_, co_pts, _), (_, cx_pts, _) in zip(co_out, cx_out):
+        co_bs, cx_bs = _broadside(co_pts, 2), _broadside(cx_pts, 2)
+        rows.append({"co_pol": co, "cross_pol": cx,
+                     "isolation_dB": round(max(co_bs) - max(cx_bs), 2) if co_bs and cx_bs else None})
+    return rows, (f1 or []) + (f2 or [])
+
+
+_FF_METRICS = {"gain": _m_gain, "axial_ratio": _m_axial_ratio, "front_to_back": _m_front_to_back,
+               "hpbw": _m_hpbw, "cross_pol": _m_cross_pol}
 
 
 @tool({"type": "function", "function": {
-    "name": "get_parametric_cross_pol_isolation",
-    "description": "取参扫各组合共/交叉极化隔离(broadside co 增益 − cross 增益,dB)。须 save_fields + Sphere。",
+    "name": "get_parametric_farfield",
+    "description": ("取参扫各组合的远场标量指标,metrics 可一次要多个:"
+                    "gain=峰值/broadside 增益;axial_ratio=最小/broadside 轴比(<threshold_dB 算 CP);"
+                    "front_to_back=θ≈0 与 θ≈180 增益差;hpbw=phi_cut 切面半功率波束宽度;"
+                    "cross_pol=broadside co_pol 与正交极化增益差(须给 co_pol)。"
+                    "须 save_fields=True 跑参扫 + Infinite Sphere。"),
     "parameters": {"type": "object", "properties": {
-        "parametric": {"type": "string"}, "co_pol": {"type": "string", "enum": ["lhcp", "rhcp", "theta", "phi"]},
+        "parametric": {"type": "string"},
+        "metrics": {"type": "array", "items": {"type": "string", "enum": list(_FF_METRICS)}},
         "sphere": {"type": "string", "default": "Sphere1"}, "setup": {"type": "string"},
         "sweep": {"type": "string", "default": "LastAdaptive"},
-        "gain_type": {"type": "string", "enum": ["realized", "total"], "default": "realized"}},
-        "required": ["parametric", "co_pol"]}}})
-def get_parametric_cross_pol_isolation(ctx, parametric, co_pol, sphere="Sphere1", setup=None,
-                                       sweep="LastAdaptive", gain_type="realized"):
-    cx = _CROSS.get(co_pol)
-    if not cx:
-        return {"ok": False, "error": f"co_pol 不合法: {co_pol}"}
-    co_out, f1 = _ff_metric(ctx, parametric, _gain_expr(gain_type, co_pol), sphere, setup, sweep, phi="0deg")
-    if co_out is None:
-        return {"ok": False, "error": f"co 报告失败: {f1}"}
-    cx_out, f2 = _ff_metric(ctx, parametric, _gain_expr(gain_type, cx), sphere, setup, sweep, phi="0deg")
-    if cx_out is None:
-        return {"ok": False, "error": f"cross 报告失败: {f2}"}
-    cx_map = {tuple(sorted(v.items())): pts for v, pts, _ in cx_out}
-    res = []
-    for var, co_pts, _ in co_out:
-        co_bs = [v for i, v in co_pts if i and abs(i[0]) < 2]
-        cx_bs = [v for i, v in cx_map.get(tuple(sorted(var.items())), []) if i and abs(i[0]) < 2]
-        res.append({"variation": var, "co_pol": co_pol, "cross_pol": cx,
-                    "isolation_dB": round(max(co_bs) - max(cx_bs), 2) if co_bs and cx_bs else None})
-    return _with_fails({"ok": True, "parametric": parametric, "n_variations": len(res), "results": res},
-                       (f1 or []) + (f2 or []))
+        "gain_type": {"type": "string", "enum": ["realized", "total"], "default": "realized"},
+        "polarization": {"type": "string", "enum": ["total", "lhcp", "rhcp", "theta", "phi"], "default": "total"},
+        "phi_cut": {"type": "string", "default": "0deg"},
+        "co_pol": {"type": "string", "enum": ["lhcp", "rhcp", "theta", "phi"]},
+        "threshold_dB": {"type": "number", "default": 3.0}},
+        "required": ["parametric", "metrics"]}}})
+def get_parametric_farfield(ctx, parametric, metrics, sphere="Sphere1", setup=None, sweep="LastAdaptive",
+                            gain_type="realized", polarization="total", phi_cut="0deg", co_pol=None,
+                            threshold_dB=3.0):
+    if isinstance(metrics, str):
+        metrics = [metrics]
+    metrics = list(dict.fromkeys(metrics))
+    bad = [m for m in metrics if m not in _FF_METRICS]
+    if bad or not metrics:
+        return {"ok": False, "error": f"metrics 不认识: {bad}", "allowed": list(_FF_METRICS)}
+    names, variations = _variations(ctx, parametric, setup)
+    if not names:
+        return {"ok": False, "error": f"参扫 '{parametric}' 未知或无变量"}
+    a = dict(parametric=parametric, sphere=sphere, setup=setup, sweep=sweep, gain_type=gain_type,
+             polarization=polarization, phi_cut=phi_cut, co_pol=co_pol, threshold_dB=threshold_dB)
+    # 各指标逐组顺序与 _variations 一致,按下标拼到同一行
+    res = [{"variation": vd} for vd in variations]
+    fails = []
+    for m in metrics:
+        rows, f = _FF_METRICS[m](ctx, a)
+        if rows is None:
+            return {"ok": False, "metric": m, "error": f}
+        for r, row in zip(res, rows):
+            r.update(row)
+        fails += [dict(x, metric=m) for x in f]
+    return _with_fails({"ok": True, "parametric": parametric, "metrics": metrics,
+                        "gain_type": gain_type, "polarization": polarization,
+                        "n_variations": len(res), "results": res}, fails)
 
 
 @tool({

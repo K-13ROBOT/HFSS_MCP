@@ -41,7 +41,7 @@
 
 ### 参扫
 1. 变量先 `set_variable`;`create_parametric_sweep` 要远场指标传 `save_fields=True`
-2. `run_parametric_sweep`(阻塞)→ `get_parametric_results` / `get_parametric_gain` / ...
+2. `run_parametric_sweep`(阻塞)→ `get_parametric_results`(S11)/ `get_parametric_farfield`(远场指标)
 - 参扫共用网格,比循环改变量多次 analyze 快得多;多变量先单变量看敏感性,别直接 5×5 笛卡尔积
 - 粗扫(3~5 点)定位 → 最优区间细扫(7~11 点)→ `set_variable` 落最佳值单点 `analyze` 复核
 - 卡住时指出哪个变量到了边界,**别无限扩范围撞运气**

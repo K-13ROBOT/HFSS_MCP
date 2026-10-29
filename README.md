@@ -6,18 +6,18 @@
 
 **连接全走 win32com 裸调 AEDT 原生脚本 API**(oDesktop/oEditor/oModule),**不依赖 PyAEDT**。实测 2019.2 和 2025.2 都通,PyAEDT/gRPC 够不到的老版本 HFSS(如 2019)也能驱动。
 
-**目录**:[为什么不依赖 PyAEDT](#为什么不依赖-pyaedt) · [能做什么](#能做什么96-个工具) · [skill 层](#skill-层三个) · [已验证](#已验证) · [安装](#安装) · [配置 & 用法](#配置--用法) · [用别的 MCP 客户端](#用别的-mcp-客户端) · [代码结构](#代码结构) · [已知的版本差异](#已知的版本差异)
+**目录**:[为什么不依赖 PyAEDT](#为什么不依赖-pyaedt) · [能做什么](#能做什么89-个工具) · [skill 层](#skill-层三个) · [已验证](#已验证) · [安装](#安装) · [配置 & 用法](#配置--用法) · [用别的 MCP 客户端](#用别的-mcp-客户端) · [代码结构](#代码结构) · [已知的版本差异](#已知的版本差异)
 
 ## 为什么不依赖 PyAEDT
 
 - 连接 = `win32com.Dispatch("Ansoft.ElectronicsDesktop." + version)`(ProgID 每个装机版本都注册),不卡 PyAEDT 版本下限,也不依赖 gRPC(2022R2+ 才有)。
 - 操作 = AEDT 原生脚本 API(宏录制那套),自 ~v15 稳定。
 
-## 能做什么(96 个工具)
+## 能做什么(89 个工具)
 
 | 域 | 能力 |
 |---|---|
-| **会话** | open/attach/close、新建工程与设计、**从路径打开已有 .aedt**、切换/列举、保存工程、reset |
+| **会话** | open/attach/close、新建工程与设计、**从路径打开已有 .aedt**、切换/列举、保存工程 |
 | **几何** | box/rectangle/circle/cylinder/sphere/polyline/helix、布尔(并/减/交)、`split`、`thicken`(sheet→实体)、变换(移动/旋转/镜像/线阵·环阵复制)、变量驱动、材料(含**自定义 εr/tanδ**)、delete |
 | **改已有对象** | `get_object_history` 看建模历史(每步操作的路径和参数,含布尔里被消耗的工具对象、多边形去重点表);`set_history_props` 改某一步的参数(如减掉的工具圆的半径/圆心);`replace_in_history` 把写死的值批量换成表达式(如馈线多边形里 200 个点的锚点 `-1.8mm` → 变量)。不新建对象,改完跟着变量联动。2019.2 没有对象模型,只能按 `对象:命令:序号` 改单个操作的参数 |
 | **自检 & 诊断** | `get_object_bbox`(看层叠/搭接)、`design_summary`、list_objects/variables;**`validate_design`**(HFSS 自带 Validation Check,analyze 前挡配置漏)、**`get_messages`**(读消息窗口——"跑通了但数不对"的第一手线索) |
@@ -27,11 +27,11 @@
 | **本征模** | `create_eigenmode_setup` + `get_eigenmodes`——不要端口、不要激励,直接解结构自身的谐振频率与 Q。腔体/滤波器/介质谐振器(DRA)/周期结构的模式分析;驱动求解要先猜馈电位置,猜错了模激发不出来,本征模没这问题。50×25×40mm 腔实测与解析解偏差 <0.02% |
 | **求解 & 结果** | setup + 扫频 + analyze(驱动求解);S11/谐振/-10dB 带宽、**VSWR + 输入阻抗 Zin**、**远场方向图**、**轴比 AR vs 频率 + 3dB 轴比带宽** |
 | **场诊断** | `get_current_along_path`——沿 polyline 取表面电流分布 + 判据(模次 = 内部零点数+1、峰值位置、首尾衰减 dB)。补的是"只能测进去多少/出来多少、看不见结构上实际流了什么"这个盲区:失配不知往哪调、谐振对而方向图不对、寄生臂有没有被激励、行波辐射完没、弱接触,都靠它。**条件触发不是每次都看**,见 `flow/diagnose-current.md` |
-| **参数扫描** | 一次解全部组合 + 6 指标提取:S11 / 增益 / 轴比 / 前后比 / HPBW / 交叉极化隔离 |
+| **参数扫描** | 一次解全部组合 + 指标提取:`get_parametric_results`(S11)、`get_parametric_farfield`(增益 / 轴比 / 前后比 / HPBW / 交叉极化隔离,一次可取多个) |
 | **优化** | HFSS 内置优化器:给代价表达式和目标值,求解器自己梯度/遗传迭代,写回最优变量 |
 | **设计分析** | **灵敏度**——在工作点算各变量对指标的偏导,扫参前先问"该动哪个";权重远小于 1 的变量直接固定,省掉大半机时。**公差/良率**——加工公差分布跑蒙特卡洛,出指标分布与良率,回答"按这个公差投产能做出来吗"。两者是同一个偏导的两面:前者问动哪个旋钮,后者问旋钮抖动时结果散多少 |
 | **工程卫生** | `cleanup_solutions` 回收解/场数据(对应 GUI 的 Clean Up Solutions)、`delete_setup` / `delete_sweep` / `delete_parametric` 清掉建错的和孤儿的——三个删除工具都是 `confirm=true` 才真删,不传 names 时只回显清单。**调参期工程里只留一个 setup**,存场扫频堆着会让每轮求解从十几分钟涨到一两小时 |
-| **辅助设计** | `search_designs` / `list_design_cards` / `read_design_card`——按指标检索 `skill/.../design/` 设计卡片并**经 MCP 取回正文**拿起手尺寸;`check_design_targets`——实测 vs 目标逐项对标判定(指标驱动设计闭环的终止门) |
+| **辅助设计** | `search_designs` / `read_design_card`——按指标检索(不给条件列全部) `skill/.../design/` 设计卡片并**经 MCP 取回正文**拿起手尺寸;`check_design_targets`——实测 vs 目标逐项对标判定(指标驱动设计闭环的终止门) |
 
 **可用性**:求解前 bbox 自检挡建歪、自动配色(导体金/铜、介质半透明、空气近透明)、阻塞操作弹确认框。
 
@@ -88,7 +88,7 @@ skill 的路由靠 agent 自己判断任务性质,**命令给一个不靠判断�
 | `knowledge/` | **建模排错经验**:机理、HFSS 操作陷阱、哪个自由度控哪个指标 | 换一篇同类但结构不同的论文还用得上 |
 | `papers/` | **文献原文**:`_HOWTO.md`(通用读法,随分发)+ 每篇的「章节/图表→页」索引 + PDF(个人资料,不分发) | 卡片只够选型,要建就得回原图 |
 
-`design/` 由 `search_designs` / `list_design_cards` / `read_design_card` 三个 MCP 工具检索,所以**换任何 MCP
+`design/` 由 `search_designs` / `read_design_card` 两个 MCP 工具检索,所以**换任何 MCP
 客户端都取得到**;`knowledge/` 和 `papers/` 靠模型读文件。
 
 > **一条纪律贯穿三个 skill**:卡片只录**自己仿真达标、且用户确认**过的东西,录的是**公式和归一化常数,
@@ -98,7 +98,7 @@ skill 的路由靠 agent 自己判断任务性质,**命令给一个不靠判断�
 ## 已验证
 
 - **版本**:连接 + 建模在 2019.2 和 2025.2 都实测通过。
-- **建模/求解/参扫的核心工具**在 2019.2 实测(含最难的参扫结果提取);辅助设计 3 个工具(`search_designs`/`list_design_cards`/`check_design_targets`)为纯本地逻辑、单测通过。
+- **建模/求解/参扫的核心工具**在 2019.2 实测(含最难的参扫结果提取);辅助设计 3 个工具(`search_designs`/`read_design_card`/`check_design_targets`)为纯本地逻辑、单测通过。
 - **诊断工具**(`validate_design` / `get_messages`)在 2019.2 + 2025.2 双版本实测:坏 design(无激励 / 材料没设 solve inside)判 `passed=false`,好 design 判 `passed=true`;两版的返回码类型与消息延迟差异已在代码里兜住(见[已知的版本差异](#已知的版本差异))。
 - **周期单元工具**(主从边界 + Floquet 端口)按 AEDT 脚本 API 实现、参数构造离线核对通过,但**COM 行为尚未逐版本真机回归**——首次用请盯结果。
 - **最近新增的工具在 2019.2 + 2025.2 双版本回归通过**(15/15):场诊断(沿路径取表面电流)、灵敏度三件套、统计/公差三件套、本征模求解,以及 `thicken` / `create_circle` / `split` / `create_wave_port` / `delete_sweep` / `cleanup_solutions`。
@@ -202,13 +202,13 @@ server 是标准 MCP stdio,**任何 MCP 客户端都能挂**(Claude Desktop、Cl
 }
 ```
 
-**兼容性已实测**(用通用 MCP SDK 客户端,非 Claude Code):协议版本 2024-11-05 / 2025-03-26 / 2025-06-18 都能正确协商降级;96 个工具 schema 全合规;返回统一 `TextContent` + UTF-8 JSON;stdout 做了 fd 级隔离。**cwd 由客户端决定**——落在不可写目录(如系统目录)时,`projects/`、`exports/`、`traces/` 会自动退到 `~/.hfss-agent/`,不会像以前那样在 initialize 之前就崩。
+**兼容性已实测**(用通用 MCP SDK 客户端,非 Claude Code):协议版本 2024-11-05 / 2025-03-26 / 2025-06-18 都能正确协商降级;89 个工具 schema 全合规;返回统一 `TextContent` + UTF-8 JSON;stdout 做了 fd 级隔离。**cwd 由客户端决定**——落在不可写目录(如系统目录)时,`projects/`、`exports/`、`traces/` 会自动退到 `~/.hfss-agent/`,不会像以前那样在 initialize 之前就崩。
 
 **长任务不再阻塞协议**:所有 COM 调用跑在一个专用线程上,事件循环全程空闲——实测 `analyze` 求解期间 `tools/list` 连续 9 次全部 <0.01s 返回。客户端的 ping/keepalive 不会超时,不会误判 server 已死而杀进程。但注意**两点仍然成立**:① `analyze` 这个请求本身就是几分钟,设了硬性单请求超时的客户端仍会在这一个调用上超时;② 求解**无法中途中止**(阻塞 COM 调用没有中断点),客户端发的 cancel 会被应答但求解照跑,后续调用排在它后面。
 
 换客户端会**丢两样 Claude Code 专属能力**,知道就行:
 
-1. **三个 skill 都不会自动加载**——那是 Claude 的 skill 机制,别的客户端不读。96 个工具照样能调,但丢了"怎么正确用"的纪律([skill 层](#skill-层三个)那一节的全部内容)。
+1. **三个 skill 都不会自动加载**——那是 Claude 的 skill 机制,别的客户端不读。89 个工具照样能调,但丢了"怎么正确用"的纪律([skill 层](#skill-层三个)那一节的全部内容)。
    - 变通:把 `skill/hfss-design/SKILL.md` 放进那个 agent 的 system prompt 当指南;要查文献或还原叠层再补 `skill/hfss-search/` 或 `skill/hfss-stackup/` 的 SKILL.md。
    - `design/` 卡片库不受影响——它由 `search_designs` / `read_design_card` 经 MCP 提供,任何客户端都取得到;`knowledge/` 和 `papers/` 则要靠那个 agent 自己有文件读取能力。
 2. **确认门**——如上,stdio 下进程内确认已关。客户端若没有工具授权 UI,`analyze`/扫参/优化会**直接跑、不问你**。用支持 MCP 工具授权的客户端,或自己留意别误触。

@@ -136,7 +136,7 @@ description: >-
 | 机理、建模陷阱、调试时踩的坑 | `knowledge/<type>.md` | 换一篇同类但结构不同的论文还用得上 |
 | 论文那一款的绝对毫米尺寸 | **哪都不去** | 换频率就作废,留着误导 |
 
-具体格式走 `hfss-design` 的 `flow/capture-learning.md`。卡片目录用 `list_design_cards` 返回的 `dir` 字段定位,别硬编码路径。
+具体格式走 `hfss-design` 的 `flow/capture-learning.md`。卡片目录用 `search_designs` 返回的 `dir` 字段定位,别硬编码路径。
 
 论文 PDF 放 `hfss-design` skill 的 `papers/` 目录(版权原因不入 git),并在 `papers/INDEX.md` 登记;
 卡片的 `source:` 写 DOI 并回指 `papers/INDEX.md` 的对应行,以后要翻推导还能找到原文和页码。

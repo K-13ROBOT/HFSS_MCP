@@ -66,6 +66,11 @@ def _clear(ctx):
     ctx["foreign_projects"] = set()   # 连上时实例里已经开着的工程 —— 别人的,不许关
     ctx["own_projects"] = set()       # 本会话 new_project / open_project 出来的
     ctx["shared_instance"] = False    # 连上的是已在运行的实例(不是本会话起的)—— 收尾不许退出它
+    st = ctx.get("state")             # 旧实例的变量/对象/端口缓存一起作废,重连后不会串到新实例上
+    if st is not None:
+        st.project = ""; st.design = ""
+        for d in (st.variables, st.objects, st.boundaries, st.excitations, st.setups):
+            d.clear()
 
 
 def _aedt_pids():
@@ -590,24 +595,6 @@ def delete_design(ctx, names, confirm=False):
     if failed:
         result["failed"] = failed
     return result
-
-
-@tool({
-    "type": "function",
-    "function": {
-        "name": "reset_session",
-        "description": "强制清空 Agent 内部会话状态(desktop/project/design 全置空)。COM 句柄失效时调用。",
-        "parameters": {"type": "object", "properties": {}},
-    },
-})
-def reset_session(ctx):
-    _clear(ctx)
-    if "state" in ctx:
-        st = ctx["state"]
-        st.project = ""; st.design = ""
-        for d in (st.variables, st.objects, st.boundaries, st.excitations, st.setups):
-            d.clear()
-    return {"ok": True, "msg": "会话已重置,可重新 open_desktop / attach_desktop"}
 
 
 @tool({

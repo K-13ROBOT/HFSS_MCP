@@ -64,15 +64,14 @@ description: >-
 
 ## 2. 故障判定(别动核武器)
 - 工具单次失败通常是参数错 → 报告错误、按提示改,**不要 reset、不要重建 design**。
-- 只有 AEDT 本身没了(连续多个不同工具报 COM 断连/RPC 不可用,`list_projects` 也失败)才 `reset_session`,
-  再 `open_desktop` / `attach_desktop`。
+- 只有 AEDT 本身没了(连续多个不同工具报 COM 断连/RPC 不可用,`list_projects` 也失败)才重新
+  `open_desktop` / `attach_desktop`(会顺带清掉旧会话的缓存)。
 - `new_design` / `delete_design` 除非用户明确要求,**永远别主动调**。
 
 ## 3. 通用约定
 - 坐标/尺寸传**字符串**,带单位(`'10mm'`)或变量表达式(`'L1+1mm'`);对象名只用英文字母数字下划线。
 - 复杂结构先 `set_variable` 再用变量名建几何;建错用 `delete_object` 删掉重建,不要堆叠。
 - 材料用 HFSS 内置库(`'copper'`/`'FR4_epoxy'`/`'Vacuum'`);论文 εr/tanδ 和库里对不上就 `create_material` 按原值建。
-- 颜色按材料和角色自动配,一般不用手动设(要覆盖用 `set_object_color`)。
 - setup / 扫频 / 参扫都**不能同名覆盖**,建错先删再建;删除类工具都要 `confirm=true` 才真删,删 setup/扫频会连带删掉结果,删前先把要留的数取完。
 - 磁盘吃紧用 `cleanup_solutions`(默认只删场、保留 S 参数)。**删场之后远场就取不到了**,先把远场取完再清。
 

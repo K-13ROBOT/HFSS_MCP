@@ -1,6 +1,6 @@
 """轴比 vs 频率(CP 天线对标门,native COM 版)。
 
-与 parametrics.get_parametric_axial_ratio 的分工:
+与 parametrics.get_parametric_farfield(axial_ratio) 的分工:
 - 那个:参扫**各组合**在单个频点的最小 AR —— 用来在设计空间里找最优组合;
 - 本篇:**一个设计**在整条扫频上的 AR 曲线 —— 用来判 AR<=3dB 的**连续带宽**是否覆盖工作频段。
 
@@ -50,7 +50,7 @@ def _ghz(v):
     "function": {
         "name": "get_axial_ratio",
         "description": ("取单个已求解设计的**轴比 AR(dB) vs 频率**曲线 + 3dB 轴比带宽,默认 boresight(θ=0,φ=0)。"
-            "与 get_parametric_axial_ratio 的区别:那个是参扫各组合在**单频点**的最小 AR;"
+            "与 get_parametric_farfield(metrics=['axial_ratio']) 的区别:那个是参扫各组合在**单频点**的最小 AR;"
             "这个是一个设计**整条扫频**的 AR 曲线,能直接给出 AR≤3dB 的连续带宽。"
             "**前提:扫频是 create_sweep(sweep_type='Discrete', save_fields=True) 建的**,且有辐射边界和无穷远球面。"),
         "parameters": {
