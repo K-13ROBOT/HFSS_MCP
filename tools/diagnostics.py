@@ -84,8 +84,7 @@ def _summarize(msgs):
                 "design": {"type": "string",
                            "description": "design 名;省略用当前 active design,传 '' 取该工程全部 design"},
                 "severity": {"type": "integer", "default": 0,
-                             "description": "HFSS 侧过滤级别。**2025.2 实测 0/1/2 返回结果完全相同、该参数不起作用**,"
-                                            "所以工具**另外**按消息里的 [error]/[warning] 标记自行分桶——以分桶结果为准"},
+                             "description": "HFSS 侧过滤级别(实测不起作用,一般不用传);分桶以返回的 error/warning 计数为准"},
                 "limit": {"type": "integer", "default": 50,
                           "description": "返回最近多少条原文,默认 50(分桶计数不受限)"},
                 "errors_only": {"type": "boolean", "default": False,

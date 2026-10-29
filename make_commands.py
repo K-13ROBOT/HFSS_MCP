@@ -20,7 +20,7 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, "commands")
 CORE_MD = os.path.join(ROOT, "skill", "hfss-design", "SKILL.md")
-CORE = "`~/.claude/skills/hfss-design/SKILL.md`"
+CORE = "用 Skill 工具加载 `hfss-design`(它的 `SKILL.md`)"
 
 # 路由表里不属于"建模"的行,按关键词排除(调参/诊断归 /hfss-tune)
 _TUNE_ROWS = ("不达标", "不知道为什么")
@@ -57,15 +57,12 @@ def model_branches():
 
 MODEL = """# HFSS 建模:把天线建出来并求解
 
-读 {core} —— 常驻约定(坐标层叠、sheet 规则、故障判定、卡住了怎么办),
-**然后按它的路由表判断这次属于哪种,去读对应的流程卡**:
+先{core} —— 常驻约定(坐标层叠、sheet 规则、故障判定、卡住了怎么办),
+**再按它的路由表判断这次属于哪种,去读对应的流程卡**(路径相对 skill 目录):
 
 {branches}
 
-一个任务读 3~4 份是正常的。拿不准读哪张就先读路由表本身。
-
-⚠️ **任务性质中途变了就回路由表重查**,别抱着一张卡走到黑。
-最常见的转变:建完发现指标差得远 → 该转 `/hfss-tune`。
+一个任务读 3~4 份是正常的。任务性质中途变了就回路由表重查;建完发现指标差得远 → 转 `/hfss-tune`。
 
 > 上面这份分支列表由 `make_commands.py` 从 `SKILL.md` 的路由表生成,别手改 ——
 > 改路由表后重跑脚本即可。
@@ -79,18 +76,12 @@ $ARGUMENTS
 
 TUNE = """# HFSS 优化:指标不达标,去调
 
-读这两份,**严格按它们执行**:
-
-1. {core} —— 常驻约定。**其中「卡住了怎么办」那一节定义了什么时候必须停手,
-   以及"一轮"怎么数、未达标项怎么列。照它执行,本命令不复述。**
-2. `~/.claude/skills/hfss-design/flow/tuning.md` —— 调参流程卡。
+1. {core} —— 其中「卡住了怎么办」定义了什么时候必须停手、"一轮"怎么数、未达标项怎么列。
+2. 读 skill 目录下的 `flow/tuning.md` —— 调参流程卡,严格按它执行。
 
 ⚠️ {tune_rule}
 
-步骤顺序、每步的判据和代价都在流程卡里,**本命令不复述**(复述了就会和卡漂移)。
-
-调不动、或根本不知道为什么不工作 → 按核心约定里的退出条件转
-`flow/diagnose-current.md` 看机理。
+调不动、或不知道为什么不工作 → 按退出条件转 `flow/diagnose-current.md` 看机理。
 
 ---
 

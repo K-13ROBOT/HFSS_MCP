@@ -148,9 +148,10 @@ def _features(xs, ys, null_frac):
         "description": ("沿一条 polyline 取**表面电流 |J| 的分布**(幅度 vs 沿线距离)+ 判据:"
             "峰值与位置、内部零点数、首尾衰减 dB。**模次 = n_nulls + 1**(端点天然为零不计)。"
             "其余 get_* 只测进去多少/出来多少,这个看结构上实际流了什么。"
-            "两条硬前提,违反了会拿到空数据或假读数(详见 `flow/diagnose-current.md`):"
-            "**采样线用 create_polyline(non_model=True) 画**(模型线求解后画会让解作废,COM 无提示;非模型线不会);"
-            "**线要略短于导体、避开馈电点**。什么时候该调见 `flow/diagnose-current.md`,别每次取结果都调。"),
+            "**采样线用 create_polyline(non_model=True, close_surface=False, cover_surface=False) 画**"
+            "(模型线求解后画会让解作废、COM 无提示;不关闭合/覆面会变成一去一回的路径),"
+            "**线要略短于导体、避开馈电点**(否则读到的是馈电区电流)。"
+            "什么时候该调见 `flow/diagnose-current.md`,别每次取结果都调。"),
         "parameters": {
             "type": "object",
             "properties": {

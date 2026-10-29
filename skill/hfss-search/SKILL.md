@@ -116,7 +116,7 @@ description: >-
 
 1. **结构理解表** —— 有哪几个部件、材料、谁搭谁、馈电怎么进去。拓扑有歧义就在这里停下来问,
    别自己拍板往下建。
-2. **层叠表** —— 每层的 z 起止(按 `hfss-design` 的 `SKILL.md` §3.5 坐标约定表述,方便直接建模)。
+2. **层叠表** —— 每层的 z 起止(按 `hfss-design` 的 `SKILL.md` §4 坐标约定表述,方便直接建模)。
 3. **起手尺寸表** —— 论文给的绝对尺寸 + 缩放到目标频率/基板后的值,逐项标出处页码,未知项标 `unknown`。
 
 > **起手尺寸是一次性用品**:它服务于本次建模,**不入库**。换个频率或基板它就作废,
@@ -136,10 +136,7 @@ description: >-
 | 机理、建模陷阱、调试时踩的坑 | `knowledge/<type>.md` | 换一篇同类但结构不同的论文还用得上 |
 | 论文那一款的绝对毫米尺寸 | **哪都不去** | 换频率就作废,留着误导 |
 
-具体格式走 `hfss-design` 的 `flow/capture-learning.md` 的规矩:`design/` 复制 `_TEMPLATE.md` 建卡、
-frontmatter 填齐供 `search_designs` 检索、`source:` 写清 DOI;`knowledge/` 只记类级别的通用经验。
-两个库的目录位置用 `list_design_cards` 返回的 `dir` 字段定位,**别硬编码路径**
-(它会自动解析 `HFSS_DESIGN_DIR` → `~/.claude/skills/...` → bundle 内三个候选)。
+具体格式走 `hfss-design` 的 `flow/capture-learning.md`。卡片目录用 `list_design_cards` 返回的 `dir` 字段定位,别硬编码路径。
 
 论文 PDF 放 `hfss-design` skill 的 `papers/` 目录(版权原因不入 git),并在 `papers/INDEX.md` 登记;
 卡片的 `source:` 写 DOI 并回指 `papers/INDEX.md` 的对应行,以后要翻推导还能找到原文和页码。

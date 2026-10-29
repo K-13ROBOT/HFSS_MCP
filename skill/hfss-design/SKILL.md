@@ -8,181 +8,88 @@ description: >-
 
 # HFSS 天线建模
 
-你是 HFSS 天线建模助手。用户用自然语言描述几何,你必须调用 `hfss-agent` MCP server 的工具
-在 HFSS 中**实际建模**,不要只用文字回答。所有工具名见 `/mcp` 或工具列表。
+用户用自然语言描述结构,你调 `hfss-agent` MCP 工具在 HFSS 里**实际建模**,不要只用文字回答。
+工具怎么用以工具描述为准;本文件和流程卡只讲流程和判断。
 
 ## ★ 路由:什么任务读哪张流程卡
 
-**本文件只放"每个任务都要守"的约定 —— 读完它只够起步,不够干活。**
-具体流程全在 `flow/` 里,下表按任务给出**必须先读的卡**。
-**不是"相关时可以参考",是读了才开工。** 跳过去凭印象做,踩的就是卡里写死的那些坑。
+本文件只放每个任务都要守的约定,具体流程在 `flow/` 里。**按任务读了卡再开工。**
 
-| 任务 | 必须先读 | **就算不读卡也要记住这条** |
+| 任务 | 必须先读 | 最常被违反的一条 |
 |---|---|---|
-| **开工第一件事**(任何天线任务) | [`flow/capture-learning.md`](flow/capture-learning.md) | 不读经验库 = 每次从零踩坑 |
+| **开工第一件事**(任何天线任务) | [`flow/capture-learning.md`](flow/capture-learning.md) | 先读经验库,坑只踩一次 |
 | 照论文尺寸复现 | [`flow/reproduce-paper.md`](flow/reproduce-paper.md) | **尺寸只从参数表/正文抽,绝不在图上量**;拓扑有歧义先让用户确认 |
 | 给的是**目标/规格**不是现成尺寸 | [`flow/design-loop.md`](flow/design-loop.md) | 先对标再调、调完再对标,别靠眼估说"差不多达标" |
-| 跑 S 参数 / 完整求解一个设计 | [`flow/s-parameters.md`](flow/s-parameters.md) | **顺序敏感**;求解前 bbox + validate 两道自检不许跳;**自己写脚本求解的,事后调 `get_convergence` 补查收敛**(不补等于工具层检查全部失效) |
-| 取远场(增益/轴比/HPBW/前后比) | [`flow/farfield.md`](flow/farfield.md) | **无穷远球面必须在 `create_setup` 之前建**(事后补要重解);**多端口必须先 `set_port_excitation` 设幅相**,否则算的是同相馈电 |
-| 非标准馈电(缝隙/近耦合/CPW/差分/多层) | [`flow/feeding.md`](flow/feeding.md) | **端口 sheet 绝不赋 PE**;积分线方向上要有非零跨度 |
-| 指标不达标要调(扫参/灵敏度/公差/优化) | [`flow/tuning.md`](flow/tuning.md) | **调参前先用更严的网格校准一次**(偏移<1% 才算网格够用,否则调出来的全是假的);**多谐振结构第一次不达标就先看电流** |
-| 指标不对但**不知道为什么** | [`flow/diagnose-current.md`](flow/diagnose-current.md) | **采样线用 `create_polyline(non_model=True, close_surface=False, cover_surface=False)` 画**(后两个默认 True,不写会闭合覆面)(非模型线求解后补画也不作废解;不加这个参数画的是模型线,求解后画会让解作废、COM 不报错);线要避开馈电点 |
-| 腔体/滤波器/DRA,要谐振频率与 Q | [`flow/eigenmode.md`](flow/eigenmode.md) | **design 必须建成 Eigenmode 类型**,不要端口;Q=0 是无耗不是出错 |
-| 无限阵 / FSS / 超表面单元 | [`flow/periodic.md`](flow/periodic.md) | **不要 `create_open_region`**,那是孤立天线的边界 |
-| 阵列复制、改网格、建螺旋 | [`flow/geometry-advanced.md`](flow/geometry-advanced.md) | **切 sheet 只能用 `split`**,solid 去 subtract 会把 sheet 一起删掉 |
+| 跑 S 参数 / 完整求解一个设计 | [`flow/s-parameters.md`](flow/s-parameters.md) | 求解前 bbox + validate 两道自检不许跳 |
+| 取远场(增益/轴比/HPBW/前后比) | [`flow/farfield.md`](flow/farfield.md) | **多端口先 `set_port_excitation` 设幅相**,否则算的是同相馈电 |
+| 非标准馈电(缝隙/近耦合/CPW/差分/多层) | [`flow/feeding.md`](flow/feeding.md) | **端口 sheet 绝不赋 PE** |
+| 指标不达标要调(扫参/灵敏度/公差/优化) | [`flow/tuning.md`](flow/tuning.md) | **调参前先用更严的网格校准一次**;多谐振结构第一次不达标就先看电流 |
+| 指标不对但**不知道为什么** | [`flow/diagnose-current.md`](flow/diagnose-current.md) | 采样线按 `get_current_along_path` 描述的要求画(非模型、开口、避开馈电点) |
+| 腔体/滤波器/DRA,要谐振频率与 Q | [`flow/eigenmode.md`](flow/eigenmode.md) | **design 必须建成 Eigenmode 类型**,不要端口 |
+| 无限阵 / FSS / 超表面单元 | [`flow/periodic.md`](flow/periodic.md) | **不要 `create_open_region`** |
+| 阵列复制、改网格、建螺旋 | [`flow/geometry-advanced.md`](flow/geometry-advanced.md) | 复制出来的副本**不带 PE**,复制完重新赋 |
 | 板厂叠层表还原多层板 | 转 `hfss-stackup` skill | 读错一条行业约定,整板厚度就错 |
 | 要找文献 / 卡片库没有匹配拓扑 | 转 `hfss-search` skill | 先查本地库,别一上来就联网 |
 
-> 第三列是**各卡里最常被违反的那一条**,放这儿是因为:路由表一定在上下文里,卡不一定。
-> 但它只够让你知道"有这么回事",**不能替代读卡** —— 每条背后的判据、代价、例外都在卡里。
+- **任务性质中途会变,变了就回来重查这张表。** 最常见:正向设计调了几轮调不动 → 其实已经是"不知道为什么"。
+- **收工回 `flow/capture-learning.md`**,把坑记进 `knowledge/`、把验证过的设计录成 `design/` 卡片。
+- **上下文被压缩后**,看不到这张路由表就重新用 Skill 工具加载 `hfss-design`,再重读当前任务的流程卡
+  (用 Read 读过的卡不会被自动重新注入)。求解、删除、提交结论之前尤其要先补。
 
-**收工同样要回 [`flow/capture-learning.md`](flow/capture-learning.md)** —— 把这次的坑记进
-`knowledge/`、把验证过的设计录成 `design/` 卡片。这是整套系统复利增长的机制,跳过它
-每次复现都从零踩坑。
+**三条自检**(细节在 `flow/s-parameters.md`):
+1. 求解前 `get_object_bbox` 核对层叠搭接 —— 治"建歪"
+2. analyze 前 `validate_design` —— 治"配置漏"(端口缺积分线、setup 没绑激励)
+3. 跑通了但数不对,先 `get_messages` 读消息窗口 —— 解被作废、端口阻抗偏离、不收敛只写在那里
 
-**⚠️ 上下文被压缩之后,先确认本文件还在不在,再重读流程卡。**
-长会话里上下文会被压缩成摘要。**不要假设 SKILL.md 会被自动重新注入** ——
-实测只有压缩前那一段里用 Skill 工具调用过的 skill 才会重新注入,
-更早的会话段里加载的**不会**(实测过一次:压缩后"之前调用过的 skill"里只有 docs,
-没有 hfss-design)。所以连这张路由表、连第三列的铁律都可能一起丢。
+## ★ 卡住了怎么办(退出条件,到了就停)
 
-**发现看到的是摘要而非完整历史、而任务还没做完,按这个顺序补:**
-1. **先确认 `SKILL.md` 全文还在不在**(能不能看到这张路由表和「卡住了怎么办」)。
-   不在 → **先重读 `~/.claude/skills/hfss-design/SKILL.md`**。
-2. **再重读当前任务的流程卡**(`flow/*.md` 用 Read 读过的一律不会被重新注入)。
+- **COM 参数试 2 次不通 → 停**,让用户在 AEDT 里 `Tools → Record Script To File` 手工做一次,把官方调用录出来。别继续猜参数名。
+- **同一个报错改 3 次还在 → 停**,报告现状 + 已排除的假设,让用户定方向。
+- **调不动时按"轮数 + 未达标项有没有少"数,不按"方向对不对"判**("方向对、力度不够"是最贵的自我说服):
+  - **一轮** = 改了设计变量之后的任何一次求解(单次 analyze、参扫、优化器、自己写脚本跑的都算)。
+  - **每轮在回复里列出未达标项和当前数值**(`check_design_targets` 或任何等价的逐项对表都行)。
+  - **连续两轮未达标项没少一项 → 停**,转 `flow/diagnose-current.md` 看机理,或用灵敏度(`flow/tuning.md`)查该动哪个变量。
+- **诊断完按机理改过,再两轮仍没少项 → 停下来交给用户**:报各项现状、已排除的假设、可选方向(换拓扑/松指标/继续投机时由用户定)。
+- **拿不准论文结构/标注 → 问用户**,别猜着建。
 
-尤其在做这几件事之前补:求解(`analyze`)、删除(`delete_*` / `cleanup_solutions`)、
-取场、提交结论。
+用户授权"自己调到达标、别打扰我"时,上面的退出条件**仍然优先**:授权免的是中途的小决定和逐轮汇报,
+不是"方向走不通也别说"。
 
-**⚠️ 路由不是只在开工时走一次。任务性质中途会变,变了就回来重查这张表。**
-最常见的转变:开工是"正向设计"(`flow/design-loop.md`)→ 调了几轮调不动 →
-其实已经变成"不知道为什么"(`flow/diagnose-current.md`)。
-**判据不是感觉,是下面「卡住了怎么办」里那几条可数的退出条件。**
-
-**三条绝不能跳的自检**(细节在对应的卡里,这里只是提醒它们存在):
-1. **求解前调 `get_object_bbox` 核对层叠搭接** —— 治"建歪",省机时最多的一步
-2. **analyze 前调 `validate_design`** —— 30 秒查出端口缺积分线/setup 没绑激励,
-   省得求解十分钟后才发现白跑
-3. **跑通了但数不对,先调 `get_messages` 读消息窗口** —— COM 只反映"调用失败",
-   解被作废、端口阻抗偏离、不收敛这些只写在消息窗口里
-
-## ★ 卡住了怎么办(退出条件,别钻牛角尖)
-
-反复试同一类做法是最贵的失败模式 —— 比做错一次贵得多。下面是硬性退出条件,**到了就停**:
-
-- **COM 参数试 2 次不通 → 停,让用户用 AEDT 的 `Tools → Record Script To File`
-  在界面里手工做一次、把官方调用录出来。** 别继续猜参数名和嵌套结构 ——
-  实测教训:曾连试八条假设烧掉一个多小时,录一次两分钟解决。
-- **同一个报错改 3 次还在 → 停,报告现状 + 已排除的假设**,让用户决定方向。
-  别变着花样试第四种。
-- **求解跑通了但数不对 → 先 `get_messages` 读消息窗口**,别先改几何。
-  COM 只反映"调用失败",真正的抱怨(解被作废、端口阻抗偏离、不收敛)只写在那儿。
-- **调不动时按"轮数 + 未达标项有没有少"数,不按"方向对不对"判。**
-  "方向是对的、只是力度不够"是最容易说服自己的借口,而它每次都要花一整轮机时。
-  三条配套定义,少一条这规则就能被绕过去:
-  - **一轮 = 任何为了达到目标而改了设计变量之后的求解。** 单次 `analyze`、参数扫描、
-    优化器迭代、自己写脚本跑的求解,**都算**。别拿"我这是在验证假设、不是在扫参"绕开。
-  - **每轮必须在回复里列出未达标项和当前数值。** 用 `check_design_targets` 最省事,
-    但**用任何等价的逐项判定都行**(自己写脚本判、手工对表都算)——
-    规则管的是"**列出来、数一数**"这个动作,不绑在某个工具上。
-    (MCP 连不上 AEDT、全程用自己脚本求解时,这条照样适用。)
-  - **连续两轮未达标项没少一项 → 停**,转 `flow/diagnose-current.md` 看机理,
-    或先做灵敏度(`flow/tuning.md`)搞清楚该动哪个变量。
-- **诊断完不是重开一个循环。** 按机理改过之后**再两轮仍没少项 → 停下来交给用户**,
-  报告三样:各项现状数值、**已排除的假设**(诊断出的机理 + 试过无效的方向)、可选方向。
-  诊断给的是解释不是保票,解释对了也可能改不动 —— 那时候该由用户决定是换拓扑、
-  松指标还是接着投机时,不该由你自己再开一轮。
-- **拿不准论文结构/标注 → 问用户**,别猜着建(见 `flow/reproduce-paper.md`)。
-
-停下来报告不丢人,**带着错误假设继续跑才真的烧钱**。
-
-**和"授权自主跑到达标"的关系(优先级写死,别自己权衡):**
-用户说过"你继续优化、不要通知我、直到达到目标"这类话时,**本节的退出条件仍然优先** ——
-但这不是在推翻授权,**是在给"确证不可达"下操作定义**。
-- 自主授权的意思是:**别为中途的小决定、逐轮进度、选项题打断用户**。这部分照旧,
-  各轮之间不要停、不要出选项、不要汇报"我现在试到第几轮了"。
-- 本节的退出条件回答的是另一个问题:**什么时候算已经走不通了**。到了就报,
-  因为那已经不是"小事",而是"方向走不通"。
-- 一句话:**"别为小事打断" ≠ "方向走不通也别说"**。
-
-## 0.5 显式规划(多步任务必做)
-**≥3 步的复合任务**(完整流程仿真、扫参优化、阵列设计、多目标调优)动手前先列规划——用**你宿主自带的待办/规划机制**(如 Claude Code 的 TodoWrite),本 server 不再提供 plan 工具。
-- 目标一句话写清最终交付(含可量化指标),再列有序执行步;每步开始/完成及时更新状态,跳过/卡住记原因
-- 动手前、拿不准现状时主动调 `design_summary` 对照大目标,别忘记最终交付
-- 单工具能搞定的简单请求(set 一个变量、看下对象)**不要立 plan**
-- 没有宿主规划机制的客户端:在回复里用清单显式列步骤并逐步勾,效果一样
-
-## 1. 会话流程
-启动时 HFSS 桌面是关着的,任何建模工具都会返回"无 active design"——必须先立会话:
-- "打开/启动 HFSS" → `open_desktop`
-- "连接已有 HFSS" → `attach_desktop`,再 `list_projects`
-- "新建工程 X" → `new_project`;"新建设计 X" → `new_design`
-- "打开 D:\...\xxx.aedt" / 复现已有工程 → `open_project`(传完整路径,唯一 design 自动激活)
-- "切到工程/设计 X" → `activate_project` / `activate_design`
-- 不确定状态 → `list_projects` / `list_designs` / `design_summary`
-
-## 1.5 阻塞/不可逆操作的确认
-`analyze` 和 `run_parametric_sweep` 是阻塞且耗资源的操作。**Claude Code 会就这两个工具名弹权限确认框**
-(不再是旧版工具内的 `input()`)。
-- 调用前先用自然语言预告:本次想跑什么、为什么、预估耗时(N×M×单点 ~30s),让用户心里有数再点确认
-- 用户拒绝 → 不要立刻重试,先说明再等回应
+## 1. 会话与规划
+- 启动时 HFSS 是关的,建模工具都会报"无 active design"。打开/启动 → `open_desktop`;连已开的 → `attach_desktop`;
+  然后 `new_project` + `new_design`,或 `open_project(路径)`;切换用 `activate_project` / `activate_design`。
+- **新任务先 `design_summary` 看全景**,确认 setup/端口/边界是否已存在,别重复创建。
+- ≥3 步的复合任务动手前用宿主的待办机制(如 TodoWrite)列规划,写清最终交付和可量化指标;简单请求不用。
+- `analyze` / `run_parametric_sweep` 等阻塞操作会弹权限确认:调用前先说清跑什么、为什么、预估耗时;用户拒绝就先说明再等回应。
 
 ## 2. 故障判定(别动核武器)
-- 工具单次失败通常是参数错或工具 bug → 报告错误,**不要 reset、不要重建 design**
-- `AttributeError` / gRPC 抽风是 PyAEDT 包装层 cache 问题,**HFSS 没死** → 先重试,**不要 reset**
-- `design_summary` 返回 ok=True 但某字段含 `_error`:modeler 瞬时抽风,重试一次或只看正常字段,**绝不重建**
-- 只有同时满足才走 `reset_session` + `open_desktop`:(a) 错误含 "Desktop has been released"/"grpc_plugin";(b) 连续 2+ 次不同工具都失败;(c) `list_projects` 也失败
-- `new_design` 会丢掉已建几何——除非用户明确要求,**永远别主动调**
+- 工具单次失败通常是参数错 → 报告错误、按提示改,**不要 reset、不要重建 design**。
+- 只有 AEDT 本身没了(连续多个不同工具报 COM 断连/RPC 不可用,`list_projects` 也失败)才 `reset_session`,
+  再 `open_desktop` / `attach_desktop`。
+- `new_design` / `delete_design` 除非用户明确要求,**永远别主动调**。
 
 ## 3. 通用约定
-- 坐标/尺寸是**字符串**,带单位(`'10mm'`)或变量表达式(`'L1+1mm'`),不要传裸数字
-- 对象名只用英文字母数字下划线;材料用 HFSS 内置库(`'copper'`/`'FR4_epoxy'`/`'Vacuum'`)
-- 颜色/透明度工具按材料和角色自动配(金属铜色、PE 导体金色、空气近透明、端口面灰),**一般不用手动设颜色**;赋 PE/有限电导率后导体面会自动变金/铜色
-- **介质是逐材料换色的**(海绿/宝蓝/兰花紫/深青…按首次出现顺序取调色板,同一材料全程同色),所以多层板/多介质能一眼分开;要覆盖自动配色或临时高亮某个件,用 `set_object_color`(不传 names 则只回查"材料→颜色"分配表)
-- **论文基板 εr/tanδ 跟库里材料对不上(如库里 FR4_epoxy εr≈4.4 ≠ 论文 4.2)→ 用 `create_material` 按原值精确建**再引用,别将就库材料(会让谐振系统性偏);这是忠实复现的一部分
+- 坐标/尺寸传**字符串**,带单位(`'10mm'`)或变量表达式(`'L1+1mm'`);对象名只用英文字母数字下划线。
+- 复杂结构先 `set_variable` 再用变量名建几何;建错用 `delete_object` 删掉重建,不要堆叠。
+- 材料用 HFSS 内置库(`'copper'`/`'FR4_epoxy'`/`'Vacuum'`);论文 εr/tanδ 和库里对不上就 `create_material` 按原值建。
+- 颜色按材料和角色自动配,一般不用手动设(要覆盖用 `set_object_color`)。
+- setup / 扫频 / 参扫都**不能同名覆盖**,建错先删再建;删除类工具都要 `confirm=true` 才真删,删 setup/扫频会连带删掉结果,删前先把要留的数取完。
+- 磁盘吃紧用 `cleanup_solutions`(默认只删场、保留 S 参数)。**删场之后远场就取不到了**,先把远场取完再清。
 
-## 3.5 几何坐标 / 层叠约定(复现文献"建歪"的根因 —— 必守)
-> **用户给的是板厂叠层表(StackUp Report,xlsx/csv)?** 那不走本节,转 `hfss-stackup` skill——
-> 层多、厚度不可改、必须和总厚对上,且藏着几条不成文的行业约定(D 层占号不占铜、连续同名 PP 是组总厚)。
-> 本节是**自己编层叠**时的约定(层少、厚度自己定)。
+## 4. 几何坐标 / 层叠约定(复现文献"建歪"的根因)
+> 用户给的是板厂叠层表(xlsx/csv)→ 转 `hfss-stackup` skill。本节是自己编层叠时的约定。
 
-文献只给尺寸(L×W、εr、h、f0),**几乎从不给绝对坐标/层叠**。别每篇现编坐标,按下面固定约定建,大幅减少悬空/穿模/没搭接:
-- **先把层叠用变量定死**:`set_variable` 定义 `subH`(基板厚)、`PL`/`PW`(辐射体长宽)、`gndL`/`gndW`(地板)等,几何**全引用变量**,别散落裸数字。
-- **z 轴是层叠方向,逐层显式叠放**(最常见错就在这):
-  - 地板:sheet 放在 **z=0**
-  - 基板(box):**z 从 0 到 subH**(`position` 的 z=`'0mm'`,size 的 z=`'subH'`)
-  - 辐射贴片:sheet 放在 **z=subH**(基板顶面,**不是 z=0**——放 z=0 就和地重合/悬空)
-  - 竖直馈电面:**z 跨满 0→基板厚**,同时搭到地(z=0)和贴片(z=基板顶)。端口积分线坐标(`create_edge_feed_port` 的 `z_bottom`/`z_top`、`create_lumped_port` 的 `int_start`/`int_end`)**可用变量名**(如 `z_top='subH'`)或字面量——工具会自动把变量解析成字面量(老版本直接放变量名会崩,工具已兜底)。只有**复杂表达式**(如 `'subH/2'`)解析不了,拿不准就写字面量数值。`create_coax_feed_port` 例外:`feed_x/feed_y/inner_radius/outer_radius` 要算径向积分线,**仍须字面量**。
-- **xy 平面对齐**:辐射体居中、地板/基板要**盖住**辐射体(`gndL ≥ PL`),三者 xy 最好共中心(如各自 `origin` 都按中心对称放)。
-- **空气盒/辐射边界**:`create_open_region` 自动留 ~λ/4 空白,频率传**工作频率**;别手搭过小的空气盒。
-- **单位统一 mm**;`create_rectangle` 的 `plane` 决定法线(XY=水平层、XZ/YZ=竖直面),`size_u`/`size_v` 按工具描述对应平面两轴。
-- 复现前**先列一张层叠表**(每层:对象/类型/材料/z 范围/xy 范围)让用户确认,再动手——把"猜坐标"提前到可纠正的环节。
+文献只给尺寸,几乎从不给坐标。按固定约定建:
+- **层叠先用变量定死**:`subH`(基板厚)、`PL`/`PW`(辐射体)、`gndL`/`gndW`(地板),几何全引用变量。
+- **z 轴是层叠方向**:地板 sheet 在 **z=0**;基板 box 从 0 到 `subH`;辐射贴片 sheet 在 **z=subH**(不是 0);
+  竖直馈电面 z 跨满 0→subH,同时搭到地和贴片。
+- **xy**:辐射体居中,地板/基板盖住辐射体,三者共中心。
+- 空气盒用 `create_open_region`(频率传工作频率),别手搭过小的空气盒。单位统一 mm。
+- 复现前**先列一张层叠表**(对象/材料/z 范围/xy 范围)让用户确认,再动手。
 
-## 4. 工作习惯
-- **新任务先 `design_summary` 看全景**——用户说"仿真/扫参/取数据"时尤其要查,确认 setup/port/boundary 是否已存在,**不要重复创建**
-- 复杂结构先 `set_variable` 再用变量名建几何
-- 建错用 `delete_object` 删掉重建,不要堆叠;不确定就 `list_objects` / `list_variables`
-- `delete_design` 删整个设计(几何/边界/解全没),和 `new_design` 一样**永远别主动调**,只在用户明确要求时用
-- **setup / 扫频建错同样不能同名覆盖**(`create_sweep` 重名直接 com_error)——用 `delete_sweep` / `delete_setup` 删掉再重建。两者都要**显式 `confirm=true` 才真删**,不带 confirm 只回显清单,可以先拿它当"列出现有 setup 及其扫频"用
-  - ⚠️ **删 setup/扫频 会连带删掉它已求解的结果,不可撤销**(删 setup 更狠:其下所有扫频与结果一起没)。删之前先确认要留的曲线**已经取过数或导出过 CSV**——重算一轮往往是几十分钟
-  - 名字写错**整批不动**并回显现有清单,不会删一半;所以拿不准就先不带 confirm 调一次看清单,对完再删
-- **磁盘吃紧用 `cleanup_solutions` 回收解数据**(对应 GUI 的 Clean Up Solutions)。默认 `scope='fields'`——
-  **只删场、保留 S 参数曲线**:场数据是几百 MB~几 GB/频点的大头,S 参数才几百 KB,所以调参阶段几乎总该用它,
-  磁盘立刻回收而已有的 S11/带宽照常能取。`scope='all'` 才是连 S 参数一起删(等于要重跑)。
-  ⚠️ **删场之后远场量(增益/轴比/方向图)就取不到了** —— 要先把远场数据取完/导出完再清
-  - 同样 `confirm=true` 才真删;不带 confirm 会回显结果目录当前占用,可当"看看现在占多少盘"用,删完回显 `freed`
-
-## 5. 2D sheet → 导体规则
-- `create_rectangle` / `create_polyline` 是 2D sheet,本身不是导体
-- 要当导体(贴片、地板)用,建完 sheet 后调 `assign_perfect_e`
-- **例外:端口 sheet 不要赋 PE**——会让 lumped_port 失效
-- 要把 sheet 变成 **3D 实体**(介质基板、金属块、墙体等)用 `thicken(objects, thickness, material=...)`(沿法线原地加厚,结果保留原名;`both_sides=True` 则以 sheet 为中面双向加厚)。thickness 可用变量表达式。
-  规则形状(长方体基板)直接 `create_box` 更省事;**不规则截面**(多边形基板、异形结构)才"画 sheet → thicken"。
-- **圆形件(圆地板、圆贴片、介质圆片)用 `create_circle` 画真圆**,不要用 polyline 多边形逼近。
-  多边形逼近会破坏旋转对称 —— 对圆极化/多臂结构尤其致命(轴比直接变差)。真要逼近,
-  **边数必须是对称重数的整数倍**(四臂结构取 4 的倍数)。
-- **切 sheet 只能用 `split`,不能用 `subtract`** —— 布尔要求 blank 和 tool 同类型,
-  拿 solid 去 subtract 一张 sheet 会报 com_error **并把 sheet 一起删掉**。
-  `split(objects, plane='XY'|'XZ'|'YZ', offset=..., keep='positive'|'negative')`,offset 可用变量表达式。
-  典型用途:切掉螺旋/扫掠件的斜端头、把一张大片按平面一分为二。
-
+## 5. 2D sheet → 导体
+- `create_rectangle` / `create_polyline` / `create_circle` 建的是 sheet,本身不是导体;当导体用要 `assign_perfect_e`。
+  **端口 sheet 不要赋 PE**。
+- sheet 变实体用 `thicken`;规则长方体直接 `create_box`。
+- 圆形件用 `create_circle` 画真圆,别用多边形逼近(会破坏旋转对称,CP/多臂结构轴比直接变差)。
+- **切 sheet 用 `split`,不能用 solid 去 `subtract`**(会报错并把 sheet 一起删掉)。

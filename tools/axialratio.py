@@ -52,8 +52,7 @@ def _ghz(v):
         "description": ("取单个已求解设计的**轴比 AR(dB) vs 频率**曲线 + 3dB 轴比带宽,默认 boresight(θ=0,φ=0)。"
             "与 get_parametric_axial_ratio 的区别:那个是参扫各组合在**单频点**的最小 AR;"
             "这个是一个设计**整条扫频**的 AR 曲线,能直接给出 AR≤3dB 的连续带宽。"
-            "**前提:扫频必须 create_sweep(sweep_type='Discrete', save_fields=True) 建**"
-            "(只设 save_rad_fields 不生效,远场报告会报 com_error);另需 open_region + infinite_sphere。"),
+            "**前提:扫频是 create_sweep(sweep_type='Discrete', save_fields=True) 建的**,且有辐射边界和无穷远球面。"),
         "parameters": {
             "type": "object",
             "properties": {

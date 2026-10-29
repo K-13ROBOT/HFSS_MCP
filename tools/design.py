@@ -2,7 +2,7 @@
 
 纯查表:不碰 COM/HFSS,不含设计推理(缩放/建模/对标留给 skill+Claude)。
 卡片单一真相 = design/<type>.md 的 YAML-ish frontmatter;本工具只解析+过滤,不另存库。
-卡片位置解析顺序:HFSS_DESIGN_DIR 环境变量 → 安装副本(~/.claude/...) → bundle 副本。
+卡片位置解析顺序:HFSS_DESIGN_DIR 环境变量 → 项目级安装副本(<cwd>/.claude/...)→ 用户级安装副本(~/.claude/...) → bundle 副本。
 """
 
 import os
@@ -18,6 +18,8 @@ def _design_dir():
     env = os.environ.get("HFSS_DESIGN_DIR")
     if env:
         cands.append(os.path.abspath(env))
+    # 项目级安装(install.py --project):Claude Code 以项目根为 cwd 起 server
+    cands.append(os.path.join(os.getcwd(), ".claude", "skills", "hfss-design", "design"))
     cands.append(os.path.expanduser("~/.claude/skills/hfss-design/design"))
     # 旧名兜底:skill 曾叫 hfss-antenna-modeling,改名前装的副本(以及用户攒的卡片)还在那个目录下
     cands.append(os.path.expanduser("~/.claude/skills/hfss-antenna-modeling/design"))
