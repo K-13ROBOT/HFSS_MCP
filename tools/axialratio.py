@@ -172,7 +172,7 @@ def get_axial_ratio(ctx, setup=None, sweep="Sweep1", sphere="Sphere1", theta="0d
     if len(freqs) < 2:
         return {"ok": False, "error": "扫频上只有 %d 个频点,给不出带宽" % len(freqs),
                 "at": {"freq_ghz": round(freqs[0], 4), "axial_ratio_db": round(ars[0], 3)},
-                "hint": "sweep 传成 LastAdaptive 了?改传带 save_rad_fields 的扫频名"}
+                "hint": "sweep 传成 LastAdaptive 了?改传 save_fields=True 的扫频名"}
 
     rng = None
     if freq_range and len(freq_range) == 2:

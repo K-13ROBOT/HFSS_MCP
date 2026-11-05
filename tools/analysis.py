@@ -126,7 +126,7 @@ def create_setup(ctx, name, frequency, max_passes=10, max_delta_s=0.02, frequenc
                                                    "——S 参数有解但远场报告报 com_error。要在扫频上取远场量"
                                                    "(增益/轴比 vs 频率,如 get_axial_ratio)请改传 save_fields=True。"},
                 "save_fields": {"type": "boolean", "default": False,
-                                "description": "保存完整场(很占盘)。只看 S 参数/远场时不需要。"},
+                                "description": "保存完整场(很占盘)。场图/表面电流要它;远场量也能从它取。只看 S 参数时不需要。"},
             },
             "required": ["setup", "name", "start_frequency", "stop_frequency"],
         },
@@ -146,7 +146,9 @@ def create_sweep(ctx, setup, name, start_frequency, stop_frequency, num_points=4
              "RangeCount:=", int(num_points),
              "Type:=", sweep_type,
              "SaveFields:=", bool(save_fields),
-             "SaveRadFields:=", bool(save_rad_fields or save_fields),
+             # SaveRadFields 在 AEDT 里是"只存辐射场":和 SaveFields 一起开,完整场反而不存(2025.2 实测:
+             # 扫频不进 Fields 可后处理列表,场图/表面电流取不到;远场照样能取)。所以存完整场时必须关掉它。
+             "SaveRadFields:=", bool(save_rad_fields) and not save_fields,
              "InterpTolerance:=", 0.5,
              "InterpMaxSolns:=", 250,
              "InterpMinSolns:=", 0,
@@ -163,11 +165,11 @@ def create_sweep(ctx, setup, name, start_frequency, stop_frequency, num_points=4
             {"name": name, "start": start_frequency, "stop": stop_frequency,
              "sweep_type": sweep_type,
              "save_fields": bool(save_fields),
-             "save_rad_fields": bool(save_rad_fields or save_fields)})
+             "save_rad_fields": bool(save_rad_fields) and not save_fields})
     return {"ok": True, "name": name, "setup": setup,
             "range": [start_frequency, stop_frequency], "points": num_points,
             "sweep_type": sweep_type,
-            "save_rad_fields": bool(save_rad_fields or save_fields),
+            "save_rad_fields": bool(save_rad_fields) and not save_fields,
             "save_fields": bool(save_fields)}
 
 

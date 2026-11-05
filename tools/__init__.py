@@ -71,12 +71,16 @@ def setup_freqs(oDesign):
         names = [str(x) for x in (oDesign.GetModule("AnalysisSetup").GetSetups() or [])]
     except Exception:
         return out
+    # 两个属性分开读:2019.2 没有 "Solution Freq Type"(类型记 None),频点照样要能取
     for n in names:
-        try:
-            out[n] = tuple(str(oDesign.GetPropertyValue("HfssTab", "AnalysisSetup:" + n, k))
-                           for k in ("Solution Freq Type", "Solution Freq"))
-        except Exception:
-            pass
+        vals = []
+        for k in ("Solution Freq Type", "Solution Freq"):
+            try:
+                vals.append(str(oDesign.GetPropertyValue("HfssTab", "AnalysisSetup:" + n, k)))
+            except Exception:
+                vals.append(None)
+        if vals[1] is not None:
+            out[n] = tuple(vals)
     return out
 
 
