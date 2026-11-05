@@ -223,3 +223,485 @@ def get_current_along_path(ctx, path, setup=None, sweep="LastAdaptive", freq=Non
         out["values"] = [round(v, 6) for v in ys]
     out["csv"] = csv_path
     return out
+
+
+# ---------------------------------------------------------------------------
+# 平面场分布:FieldsReporter 场计算器 → ExportOnGrid(点值 .fld)→ 叠几何轮廓出图
+# ---------------------------------------------------------------------------
+# 跟上面的 Fields 报告是两条路:沿线取样走 ReportSetup;整面取样只能走 FieldsReporter
+# (Fields 报告不支持二维网格)。场计算器是压栈式 API,所以每次都先 CalcStack("clear"),
+# 只用 CopyNamedExprToStack 取命名表达式(Mag_E = 各分量复幅值的模,峰值意义,不受相位影响)。
+# 实测(2025.2):表达式名错、频点不在解里 —— ExportOnGrid / CopyNamedExprToStack 都会抛异常,
+# 不会静默出空文件;5.2 mm 见方、0.1 mm 网格一面 ~2 s。
+# 轮廓只画金属:赋了 PE / 有限电导率 / 阻抗边界的片,和 Solve Inside=False 的实体(过孔)。
+# 端口面、未赋边界的真空片不算。多边形边精确;真圆(NumSegments=0)的边**没有顶点**,COM 读不出圆心半径 ——
+# 单边圆片用 GetFaceCenter + 面积还原,平面上挖的圆孔(避让孔)画不出,只计数报告;
+# 只有两个端点的曲线边(圆弧)画成直线弦。
+
+import ast as _ast
+import re as _re
+
+_UNIT_MM = {"mm": 1.0, "um": 1e-3, "nm": 1e-6, "cm": 10.0, "m": 1000.0, "meter": 1000.0,
+            "mil": 0.0254, "in": 25.4, "inch": 25.4}
+_METAL_BOUNDARY_TYPES = ("Perfect E", "Finite Conductivity", "Impedance", "Layered Impedance")
+_TOKEN = _re.compile(r"(\d+\.?\d*(?:[eE][-+]?\d+)?|\.\d+(?:[eE][-+]?\d+)?)\s*([A-Za-z]+)?|([A-Za-z_]\w*)")
+_SAFE_NODES = (_ast.Expression, _ast.BinOp, _ast.UnaryOp, _ast.Constant,
+               _ast.Add, _ast.Sub, _ast.Mult, _ast.Div, _ast.Pow, _ast.USub, _ast.UAdd)
+
+
+def _to_model(oDesign, val, model_units, _depth=0):
+    """长度 → 模型单位下的浮点数。接受 0.76 / '0.76mm' / 'subH' / 'subH/2+0.1mm';裸数按模型单位。"""
+    if isinstance(val, (int, float)):
+        return float(val)
+    mu = model_units.lower()
+    if mu not in _UNIT_MM:
+        raise ValueError(f"不认识的模型单位 '{model_units}'")
+    s = str(val).strip()
+    if _depth > 8:
+        raise ValueError(f"变量嵌套太深:'{s}'")
+
+    def sub(m):
+        num, unit, name = m.group(1), m.group(2), m.group(3)
+        if name:                                  # 设计变量 → 递归求值
+            try:
+                v = oDesign.GetVariableValue(name) if oDesign is not None else None
+            except Exception:
+                v = None
+            if v is None or not str(v).strip():
+                raise ValueError(f"'{s}' 里的 '{name}' 不是设计变量")
+            return repr(_to_model(oDesign, str(v), model_units, _depth + 1))
+        if not unit:
+            return num
+        if unit.lower() not in _UNIT_MM:
+            raise ValueError(f"'{s}' 里不认识的单位 '{unit}'")
+        return repr(float(num) * _UNIT_MM[unit.lower()] / _UNIT_MM[mu])
+
+    expr = _TOKEN.sub(sub, s)
+    try:
+        tree = _ast.parse(expr, mode="eval")
+    except SyntaxError:
+        raise ValueError(f"看不懂的长度 '{s}'")
+    if not all(isinstance(n, _SAFE_NODES) for n in _ast.walk(tree)):
+        raise ValueError(f"看不懂的长度 '{s}'(只支持 + - * / 和括号)")
+    return float(eval(compile(tree, "<len>", "eval"), {"__builtins__": {}}))
+
+
+def _set_sources(oDesign, excite):
+    """excite: {"PH": "1W"} 或 {"PH:1": ["1W", "90deg"]};没列的激励全部置 0W。返回 (实际设置, err)。"""
+    from .sources import _list_excitations, _match, _edit_sources
+    names = _list_excitations(oDesign)
+    want = {}
+    for k, v in excite.items():
+        hit = _match(k, names)                      # 只给端口名时取它的 1 号模
+        if hit is None:
+            return None, f"没有叫 '{k}' 的激励;可用: {names}"
+        if isinstance(v, (int, float)):
+            want[hit] = (f"{v}W", "0deg")
+        elif isinstance(v, str):
+            want[hit] = (v, "0deg")
+        else:
+            want[hit] = (str(v[0]), str(v[1]) if len(v) > 1 else "0deg")
+    get = lambda n: want.get(n, ("0W", "0deg"))
+    rows = [["Name:=", n, "Magnitude:=", get(n)[0], "Phase:=", get(n)[1]] for n in names]
+    _, err = _edit_sources(oDesign.GetModule("Solutions"), rows)
+    if err:
+        return None, err
+    return {n: get(n)[0] + "@" + get(n)[1] for n in names}, None
+
+
+def _metal_sheet_names(oDesign, oEditor):
+    """赋了金属类边界的对象名集合;查不了返回 None(调用方退回"所有片都算")。
+    GetBoundaryAssignment 返回的是**面 ID**(2025.2 实测 PE1 → ['44','56']),要换回对象名。"""
+    try:
+        bs = oDesign.GetModule("BoundarySetup")
+        raw = [str(x) for x in (bs.GetBoundaries() or [])]          # [名, 类型, 名, 类型, ...]
+        out = set()
+        for name, typ in zip(raw[0::2], raw[1::2]):
+            if typ in _METAL_BOUNDARY_TYPES:
+                for x in (bs.GetBoundaryAssignment(name) or []):
+                    x = str(x)
+                    out.add(str(oEditor.GetObjectNameByFaceID(int(x))) if x.isdigit() else x)
+        return out
+    except Exception:
+        return None
+
+
+def _plane_outlines(oDesign, oEditor, a, pos, window):
+    """切面附近的金属轮廓。a = 法向轴 0/1/2。返回 dict:
+    levels(选中的金属层坐标)、segs{level: [(u1,v1,u2,v2)]}、circles{level: [(u,v,r)]}、
+    cross(竖直片与切面的交线)、cuts(穿过切面的金属实体截面框)、n_hidden_circles、extent。
+    两遍:先只用包围盒分类、选层,再只对选中层的片读面/边/顶点(那一步 COM 调用最多)。"""
+    from .geometry import _all_object_names, _bbox_of
+    ua, va = [i for i in (0, 1, 2) if i != a]
+    sheets = set(str(x) for x in (oEditor.GetObjectsInGroup("Sheets") or []))
+    metal = _metal_sheet_names(oDesign, oEditor)
+    flat, cross, cuts, ext = [], [], [], [None] * 4
+
+    def grow(u0, u1, v0, v1):
+        for i, val, f in ((0, u0, min), (1, u1, max), (2, v0, min), (3, v1, max)):
+            ext[i] = val if ext[i] is None else f(ext[i], val)
+
+    for n in _all_object_names(oEditor):
+        is_sheet = n in sheets
+        if is_sheet:
+            if metal is not None and n not in metal:
+                continue                # 端口面、没赋边界的真空片
+        else:
+            try:
+                if str(oEditor.GetPropertyValue("Geometry3DAttributeTab", n, "Solve Inside")).lower() not in ("false", "0"):
+                    continue            # 介质/空气不画
+            except Exception:
+                continue
+        bb = _bbox_of(oEditor, n)
+        if bb is None:
+            continue
+        lo = [bb["xmin"], bb["ymin"], bb["zmin"]]
+        hi = [bb["xmax"], bb["ymax"], bb["zmax"]]
+        size = max(hi[i] - lo[i] for i in range(3)) or 1.0
+        if not is_sheet:
+            # 穿过切面的金属实体:画截面包围框(过孔近似为圆)
+            if lo[a] < pos < hi[a]:
+                du, dv = hi[ua] - lo[ua], hi[va] - lo[va]
+                kind = "circle" if abs(du - dv) < 0.15 * max(du, dv, 1e-12) else "rect"
+                cuts.append((kind, (lo[ua] + hi[ua]) / 2, (lo[va] + hi[va]) / 2, du, dv, n))
+            continue
+        grow(lo[ua], hi[ua], lo[va], hi[va])
+        if hi[a] - lo[a] >= 1e-6 * size:
+            # 片不垂直于法向轴(比如 z 片被 x 切面切):被切面穿过时画交线(按包围盒,开槽处会连上)
+            for k in (ua, va):
+                if hi[k] - lo[k] < 1e-6 * size and lo[a] < pos < hi[a]:
+                    o = va if k == ua else ua
+                    p1 = {k: lo[k], o: lo[o]}
+                    p2 = {k: lo[k], o: hi[o]}
+                    cross.append((p1[ua], p1[va], p2[ua], p2[va]))
+            continue
+        flat.append((round(lo[a], 9), n))
+
+    levels = sorted({lv for lv, _ in flat})
+    span = max(ext[1] - ext[0], ext[3] - ext[2]) if ext[0] is not None else None
+    if window is not None:
+        pick = [lv for lv in levels if abs(lv - pos) <= window]
+    else:
+        # 上下最近各一层,但离切面超过视场 10% 的不算"附近"(竖切时远处的平行片不该画进来)
+        lim = 0.1 * span if span else float("inf")
+        below = [lv for lv in levels if pos - lim <= lv <= pos]
+        above = [lv for lv in levels if pos <= lv <= pos + lim]
+        pick = sorted({x for x in ((below[-1] if below else None), (above[0] if above else None)) if x is not None})
+    # 截面框只对细实体(过孔/柱)有意义;大实体(合并成一个对象的整圈围栏等)的包围盒画出来是误导,只计数
+    big = [c for c in cuts if span and max(c[3], c[4]) > 0.15 * span]
+    cuts = [c for c in cuts if c not in big]
+    out = {"levels": pick, "segs": {}, "circles": {}, "cross": cross, "cuts": cuts, "n_hidden_circles": 0,
+           "big_solids_skipped": [c[5] for c in big], "metal_from_boundaries": metal is not None,
+           "extent": tuple(ext) if ext[0] is not None else None}
+
+    vcache = {}
+
+    def vpos(vid):
+        if vid not in vcache:
+            vcache[vid] = [float(c) for c in oEditor.GetVertexPosition(vid)]
+        return vcache[vid]
+
+    for level, n in flat:
+        if level not in pick:
+            continue
+        for f in oEditor.GetFaceIDs(n):
+            edges = list(oEditor.GetEdgeIDsFromFace(f))
+            for e in edges:
+                vs = list(oEditor.GetVertexIDsFromEdge(e))
+                if len(vs) == 2:
+                    p, q = vpos(vs[0]), vpos(vs[1])
+                    out["segs"].setdefault(level, []).append((p[ua], p[va], q[ua], q[va]))
+                elif len(edges) == 1:       # 单边圆片:圆心=面心,半径由面积还原
+                    c = [float(x) for x in oEditor.GetFaceCenter(f)]
+                    r = (float(oEditor.GetFaceArea(f)) / math.pi) ** 0.5
+                    out["circles"].setdefault(level, []).append((c[ua], c[va], r))
+                else:
+                    out["n_hidden_circles"] += 1   # 面上挖的真圆孔:读不出圆心半径
+    return out
+
+
+def _read_fld(path, ua, va, model_units):
+    """ExportOnGrid 的 .fld(坐标 SI 米)→ (us, vs, grid[v][u])。坐标换回模型单位。"""
+    k = 1000.0 / _UNIT_MM[model_units.lower()]
+    pts = []
+    with open(path, "r", errors="replace") as f:
+        for ln in f:
+            p = ln.split()
+            if len(p) < 4:
+                continue
+            try:
+                xyz = [float(p[0]) * k, float(p[1]) * k, float(p[2]) * k]
+                val = float(p[3])
+            except ValueError:
+                continue
+            if val != val:          # NaN
+                continue
+            pts.append((round(xyz[ua], 9), round(xyz[va], 9), val))
+    us = sorted({p[0] for p in pts})
+    vs = sorted({p[1] for p in pts})
+    iu = {u: i for i, u in enumerate(us)}
+    iv = {v: i for i, v in enumerate(vs)}
+    grid = [[None] * len(us) for _ in vs]
+    for u, v, val in pts:
+        grid[iv[v]][iu[u]] = val
+    return us, vs, grid
+
+
+def _hotspots(us, vs, grid, within_db=6.0, n_max=5):
+    """峰值附近(距峰 within_db dB 内)的亮区代表点,相互间隔 ≥ 8% 视场。"""
+    vals = [(grid[j][i], us[i], vs[j]) for j in range(len(vs)) for i in range(len(us)) if grid[j][i]]
+    if not vals:
+        return None, []
+    vals.sort(reverse=True)
+    peak = vals[0][0]
+    sep = 0.08 * max(us[-1] - us[0], vs[-1] - vs[0], 1e-12)
+    spots = []
+    for val, u, v in vals:
+        if 20 * math.log10(val / peak) < -within_db or len(spots) >= n_max:
+            break
+        if all(math.hypot(u - s[1], v - s[2]) >= sep for s in spots):
+            spots.append((val, u, v))
+    return peak, [{"at": [round(u, 4), round(v, 4)], "rel_db": round(20 * math.log10(val / peak), 2)}
+                  for val, u, v in spots]
+
+
+def _plot_planes(maps, outl, axes_names, title_extra, dyn_db, png):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from matplotlib.patches import Circle, Rectangle
+    gmax = max(max(v for row in g for v in row if v is not None) for _, _, _, g in maps)
+    n = len(maps)
+    du = maps[0][1][-1] - maps[0][1][0]
+    dv = maps[0][2][-1] - maps[0][2][0]
+    flat_view = dv > 0 and du > 0 and max(du / dv, dv / du) > 4     # 竖切穿薄板:等比例会压成一条线
+    fig, axs = plt.subplots(1, n, figsize=(6.2 * n, 5.8), squeeze=False)
+    lv = outl["levels"]
+    if len(lv) == 2:
+        styles = {lv[0]: ("c", "--"), lv[1]: ("w", "-")}
+    else:
+        styles = {l: (plt.cm.cool(i / max(1, len(lv) - 1)) if len(lv) > 1 else "w", "-") for i, l in enumerate(lv)}
+    for ax, (label, us, vs, g) in zip(axs[0], maps):
+        G = np.array([[np.nan if v is None or v <= 0 else 20 * np.log10(v) for v in row] for row in g])
+        im = ax.pcolormesh(us, vs, G, cmap="inferno", vmin=20 * np.log10(gmax) - dyn_db,
+                           vmax=20 * np.log10(gmax), shading="auto")
+        for l in lv:
+            col, ls = styles[l]
+            for (u1, v1, u2, v2) in outl["segs"].get(l, []):
+                ax.plot([u1, u2], [v1, v2], color=col, ls=ls, lw=0.7)
+            for (u, v, r) in outl["circles"].get(l, []):
+                ax.add_patch(Circle((u, v), r, fill=False, ec=col, ls=ls, lw=0.7))
+        for (u1, v1, u2, v2) in outl["cross"]:
+            ax.plot([u1, u2], [v1, v2], color="w", lw=0.9)
+        for kind, u, v, du_, dv_, _ in outl["cuts"]:
+            if kind == "circle" and not flat_view:
+                ax.add_patch(Circle((u, v), max(du_, dv_) / 2, fill=False, ec="lime", lw=0.8))
+            else:
+                ax.add_patch(Rectangle((u - du_ / 2, v - dv_ / 2), du_, dv_, fill=False, ec="lime", lw=0.8))
+        ax.set_xlim(us[0], us[-1])
+        ax.set_ylim(vs[0], vs[-1])
+        ax.set_aspect("auto" if flat_view else "equal")
+        ax.set_xlabel(axes_names[0])
+        ax.set_ylabel(axes_names[1] + ("  (stretched)" if flat_view else ""))
+        ax.set_title(f"{label}  {title_extra}", fontsize=9)
+        fig.colorbar(im, ax=ax, label="dB (shared scale)")
+    leg = []
+    if len(lv) == 2:
+        leg = [f"white solid = metal @ {lv[1]:g}", f"cyan dashed = metal @ {lv[0]:g}"]
+    elif len(lv) == 1:
+        leg = [f"white = metal @ {lv[0]:g}"]
+    elif lv:
+        leg = [f"metal levels {', '.join(f'{x:g}' for x in lv)} (cool colormap, low→high)"]
+    leg.append("lime = metal solids crossing the plane")
+    fig.suptitle(" | ".join(leg), fontsize=8)
+    plt.tight_layout()
+    plt.savefig(png, dpi=90)
+    plt.close(fig)
+
+
+@tool({
+    "type": "function",
+    "function": {
+        "name": "export_field_plane",
+        "description": ("导出一个**切面上的场幅度分布**(默认 Mag_E)并出图(叠加切面附近的金属轮廓 + 穿过切面的过孔),"
+            "回峰值位置与热点列表。用来回答'能量在哪 / 哪个结构在谐振 / 端口之间从哪里耦合':"
+            "只激励一个口(excite={'P1': '1W'},其余自动置 0)看另一口附近亮不亮;"
+            "传多个频点(如谐振点与正常点)同色标并排,强弱差一眼可见。"
+            "**前提:解里有场** —— 扫频须 save_fields=True(单频点离散扫频即可),或用 LastAdaptive 的自适应频点。"
+            "图是 PNG(用 Read 看),数据是 .fld 点值文本(x y z 值,坐标 SI 米)。"
+            "注意:传 excite 会改 Edit Sources,之后的远场/场图沿用这个激励;"
+            "平面里挖的真圆孔(避让孔)画不出,只报数量;圆弧边画成直线弦。"),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "position": {"type": ["string", "number"],
+                             "description": "切面位置,如 '0.76mm' 或 'subH/2';裸数按模型单位"},
+                "axis": {"type": "string", "enum": ["x", "y", "z"], "default": "z",
+                         "description": "切面法向。默认 z(水平面)"},
+                "freq": {"type": ["string", "array"], "items": {"type": "string"},
+                         "description": "频点,如 '21.1GHz' 或 ['19GHz','21.1GHz'](多个频点同色标并排)。"
+                                        "用 LastAdaptive 时可省(取 setup 的第一个自适应频点)"},
+                "setup": {"type": "string", "description": "setup 名,不传用第一个"},
+                "sweep": {"type": "string", "default": "LastAdaptive",
+                          "description": "解名:'LastAdaptive' 或一个 save_fields=True 的扫频名"},
+                "quantity": {"type": "string", "default": "Mag_E",
+                             "description": "场计算器命名表达式:Mag_E / Mag_H / Mag_Jvol 等"},
+                "excite": {"type": "object",
+                           "description": "激励 {端口名: '1W'} 或 {'端口:模号': ['1W','90deg']};没列的全置 0。"
+                                          "不传则沿用当前 Edit Sources"},
+                "range": {"type": "array", "items": {"type": ["string", "number"]},
+                          "description": "视场 [u_min, u_max, v_min, v_max](切面内两轴,z 切面即 x,y)。"
+                                         "不传取所有金属片的包围范围"},
+                "step": {"type": ["string", "number"],
+                         "description": "网格步长,不传时长边 130 点、短边至少 40 点"},
+                "outline_window": {"type": ["string", "number"],
+                                   "description": "画切面 ±这个距离内所有金属层的轮廓;不传只画上下最近的各一层"},
+                "dynamic_range_db": {"type": "number", "default": 40,
+                                     "description": "色标动态范围(从所有图的共同最大值往下),默认 40 dB"},
+                "tag": {"type": "string", "description": "输出文件名标签,不传自动生成"},
+            },
+            "required": ["position"],
+        },
+    },
+})
+def export_field_plane(ctx, position, axis="z", freq=None, setup=None, sweep="LastAdaptive",
+                       quantity="Mag_E", excite=None, range=None, step=None, outline_window=None,
+                       dynamic_range_db=40, tag=None):
+    view = range          # 参数名沿用 schema 的 range;函数体里只用 view,别遮住内置 range
+    oDesign, oEditor = ctx["oDesign"], ctx["oEditor"]
+    setup, err = resolve_setup(ctx, setup)
+    if err:
+        return err
+    soln = f"{setup} : {sweep}"
+    try:
+        avail = [str(x) for x in oDesign.GetModule("ReportSetup").GetAvailableSolutions("Fields")]
+    except Exception:
+        avail = None
+    if avail is not None and soln not in avail:
+        return {"ok": False, "error": f"'{soln}' 没有可后处理的场", "fields_solutions": avail,
+                "hint": "建一个 save_fields=True 的单频点离散扫频并求解,或改用 LastAdaptive"}
+
+    try:
+        mu = str(oEditor.GetModelUnits())
+    except Exception:
+        mu = "mm"
+    a = "xyz".index(axis)
+    ua, va = [i for i in (0, 1, 2) if i != a]
+    try:
+        pos = _to_model(oDesign, position, mu)
+        win = _to_model(oDesign, outline_window, mu) if outline_window is not None else None
+        stp_user = _to_model(oDesign, step, mu) if step is not None else None
+        rg = [_to_model(oDesign, x, mu) for x in view] if view else None
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    if rg is not None and len(rg) != 4:
+        return {"ok": False, "error": "range 要 4 个数 [u_min, u_max, v_min, v_max]"}
+
+    freqs = [freq] if isinstance(freq, str) else list(freq or [])
+    if not freqs:
+        if sweep != "LastAdaptive":
+            return {"ok": False, "error": "扫频解必须给 freq"}
+        from . import setup_freqs
+        sf = setup_freqs(oDesign).get(setup)
+        if not sf:
+            return {"ok": False, "error": f"读不到 {setup} 的自适应频点,请显式给 freq"}
+        freqs = [sf[1].split(",")[0].strip()]
+
+    outl = _plane_outlines(oDesign, oEditor, a, pos, win)
+    if rg is None:
+        if outl["extent"]:
+            rg = list(outl["extent"])
+        else:
+            bb = [float(x) for x in oEditor.GetModelBoundingBox()]
+            rg = [bb[ua], bb[ua + 3], bb[va], bb[va + 3]]
+    du, dv = rg[1] - rg[0], rg[3] - rg[2]
+    if stp_user:
+        su = sv = stp_user
+    else:
+        # 长边 130 点;短边至少 40 点(竖切穿薄板时厚度方向不然只剩几个点)
+        s_long = max(du, dv) / 130.0
+        su = min(s_long, du / 40.0) if du > 0 else s_long
+        sv = min(s_long, dv / 40.0) if dv > 0 else s_long
+
+    sources = None
+    if excite:
+        try:
+            sources, err = _set_sources(oDesign, excite)
+        except Exception as e:
+            return {"ok": False, "error": f"EditSources 失败: {type(e).__name__}: {e}"}
+        if err:
+            return {"ok": False, "error": err}
+
+    def fail(d):
+        if sources:     # 激励已经改了,出错也要让调用方知道
+            d["sources_set"] = sources
+            d["sources_note"] = "Edit Sources 已改成上面的设置(本次出错前就改了),后续远场/场图沿用它"
+        return d
+
+    from .session import EXPORTS_DIR
+    fr = oDesign.GetModule("FieldsReporter")
+    dname = str(oDesign.GetName()).split(";")[-1]
+    base = _re.sub(r"[^\w.\-]+", "_", tag or f"{dname}_{quantity}_{axis}{position}")
+    lo, hi, st = [0.0] * 3, [0.0] * 3, [su] * 3
+    lo[a] = hi[a] = pos
+    lo[ua], hi[ua], lo[va], hi[va] = rg[0], rg[1], rg[2], rg[3]
+    st[ua], st[va] = su, sv
+    fmt = lambda v: f"{v:.9g}{mu}"
+    maps, per_freq = [], []
+    for f in freqs:
+        fld = os.path.join(EXPORTS_DIR, f"field_{base}_{_re.sub(r'[^\w.]+', '_', f)}.fld")
+        if os.path.exists(fld):
+            os.remove(fld)
+        try:
+            fr.CalcStack("clear")
+            fr.CopyNamedExprToStack(quantity)
+        except Exception as e:
+            return fail({"ok": False, "error": f"场计算器取不到命名表达式 '{quantity}': {e}",
+                         "hint": "常用:Mag_E / Mag_H / Mag_Jvol / Mag_Jsurf(Jsurf 只在导体表面有值)"})
+        try:
+            fr.ExportOnGrid(fld, [fmt(v) for v in lo], [fmt(v) for v in hi], [fmt(v) for v in st],
+                            soln, ["Freq:=", f, "Phase:=", "0deg"], True, "Cartesian",
+                            ["0" + mu, "0" + mu, "0" + mu], False)
+        except Exception as e:
+            return fail({"ok": False, "error": f"ExportOnGrid 失败({f}): {e}",
+                         "hint": "最常见:freq 不在这个解的存场频点上(离散扫频只有建的那几个点);其次是解已失效"})
+        if not os.path.exists(fld) or os.path.getsize(fld) < 50:
+            return fail({"ok": False, "error": f"ExportOnGrid 没产出数据({f})", "file": fld})
+        us, vs, g = _read_fld(fld, ua, va, mu)
+        peak, spots = _hotspots(us, vs, g)
+        maps.append((f, us, vs, g))
+        per_freq.append({"freq": f, "file": fld, "peak": peak, "hotspots": spots})
+
+    gmax = max((p["peak"] for p in per_freq if p["peak"]), default=None)
+    for p in per_freq:
+        p["peak_rel_db"] = round(20 * math.log10(p["peak"] / gmax), 2) if p["peak"] and gmax else None
+        p["peak"] = round(p["peak"], 4) if p["peak"] else None
+
+    png, perr = os.path.join(EXPORTS_DIR, f"field_{base}.png"), None
+    try:
+        an = ["XYZ"[ua] + f" ({mu})", "XYZ"[va] + f" ({mu})"]
+        src = ""
+        if sources:
+            src = "  src: " + ", ".join(k for k, v in sources.items() if not v.startswith("0W"))
+        _plot_planes(maps, outl, an, f"{quantity} @ {axis}={position}{src}", float(dynamic_range_db), png)
+    except ImportError:
+        png, perr = None, "没装 matplotlib/numpy,只出数据不出图(pip install matplotlib)"
+    except Exception as e:
+        png, perr = None, f"出图失败: {type(e).__name__}: {e}"
+
+    out = {"ok": True, "solution": soln, "quantity": quantity, "plane": f"{axis}={pos:g}{mu}",
+           "range": [round(x, 4) for x in rg], "step": [round(su, 5), round(sv, 5)], "unit": mu,
+           "frequencies": per_freq, "png": png,
+           "outline": {"metal_levels": outl["levels"], "metal_solid_cuts": len(outl["cuts"]),
+                       "hidden_round_holes": outl["n_hidden_circles"],
+                       "big_solids_not_drawn": outl["big_solids_skipped"]},
+           "note": "hotspots.rel_db 相对该频点自身峰值;peak_rel_db 是各频点峰值相对所有频点最大值"}
+    if not outl["metal_from_boundaries"]:
+        out["outline"]["note"] = "查不到边界分配,所有片都当金属画了(端口面也会画进去)"
+    if sources:
+        out["sources_set"] = sources
+        out["sources_note"] = "Edit Sources 已改成上面的设置,后续远场/场图都沿用它"
+    if perr:
+        out["plot_error"] = perr
+    return out

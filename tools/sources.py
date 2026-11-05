@@ -30,6 +30,26 @@ def _match(name, available):
     return None
 
 
+_HEAD_VARIANTS = [
+    ["IncludePortPostProcessing:=", False, "SpecifySystemPower:=", False],
+    ["FieldType:=", "TotalFields", "IncludePortPostProcessing:=", False,
+     "SpecifySystemPower:=", False],
+    ["FieldType:=", "TotalFields"],
+]
+
+
+def _edit_sources(oModule, rows):
+    """EditSources 全量替换,参数块头各版本不同,挨个试。返回 (用上的头, None) 或 (None, 错误串)。"""
+    last = None
+    for head in _HEAD_VARIANTS:
+        try:
+            oModule.EditSources([head] + rows)
+            return head[0], None
+        except Exception as e:
+            last = "%s: %s" % (type(e).__name__, e)
+    return None, "EditSources 失败(已试 %d 种参数块形式): %s" % (len(_HEAD_VARIANTS), last)
+
+
 @tool({
     "type": "function",
     "function": {
@@ -95,26 +115,14 @@ def set_port_excitation(ctx, sources):
     except Exception as e:
         return {"ok": False, "error": "取 Solutions 模块失败: %s: %s" % (type(e).__name__, e)}
 
-    head_variants = [
-        ["IncludePortPostProcessing:=", False, "SpecifySystemPower:=", False],
-        ["FieldType:=", "TotalFields", "IncludePortPostProcessing:=", False,
-         "SpecifySystemPower:=", False],
-        ["FieldType:=", "TotalFields"],
-    ]
-    last = None
-    for head in head_variants:
-        try:
-            oModule.EditSources([head] + rows)
-            applied = {r[1]: {"magnitude": r[3], "phase": r[5]} for r in rows}
-            out = {"ok": True, "sources": applied, "n_ports": len(rows),
-                   "head_form": head[0]}
-            if filled:
-                out["defaulted_to_1W_0deg"] = filled
-                out["note"] = ("EditSources 是全量替换,以上端口未在 sources 中指定,"
-                               "已按 1W/0deg 填入")
-            out["hint"] = "后处理权重已改,直接取远场即可,不必重新 analyze"
-            return out
-        except Exception as e:
-            last = "%s: %s" % (type(e).__name__, e)
-    return {"ok": False, "error": "EditSources 失败(已试 %d 种参数块形式): %s" % (len(head_variants), last),
-            "tried_rows": rows}
+    head, err = _edit_sources(oModule, rows)
+    if err:
+        return {"ok": False, "error": err, "tried_rows": rows}
+    applied = {r[1]: {"magnitude": r[3], "phase": r[5]} for r in rows}
+    out = {"ok": True, "sources": applied, "n_ports": len(rows), "head_form": head}
+    if filled:
+        out["defaulted_to_1W_0deg"] = filled
+        out["note"] = ("EditSources 是全量替换,以上端口未在 sources 中指定,"
+                       "已按 1W/0deg 填入")
+    out["hint"] = "后处理权重已改,直接取远场即可,不必重新 analyze"
+    return out

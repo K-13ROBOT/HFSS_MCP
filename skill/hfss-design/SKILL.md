@@ -24,7 +24,7 @@ description: >-
 | 取远场(增益/轴比/HPBW/前后比) | [`flow/farfield.md`](flow/farfield.md) | **多端口先 `set_port_excitation` 设幅相**,否则算的是同相馈电 |
 | 非标准馈电(缝隙/近耦合/CPW/差分/多层) | [`flow/feeding.md`](flow/feeding.md) | **端口 sheet 绝不赋 PE** |
 | 指标不达标要调(扫参/灵敏度/扰动法/公差/优化) | [`flow/tuning.md`](flow/tuning.md) | **收敛了就信默认网格,先查模型和设置**;多谐振结构第一次不达标就先看电流 |
-| 指标不对但**不知道为什么** | [`flow/diagnose-current.md`](flow/diagnose-current.md) | 采样线按 `get_current_along_path` 描述的要求画(非模型、开口、避开馈电点) |
+| 指标不对但**不知道为什么** | [`flow/diagnose-current.md`](flow/diagnose-current.md) | 一维看电流用 `get_current_along_path`(采样线非模型、开口、避开馈电点);二维/不知道看哪用 `export_field_plane` 切面场图(都在扩展分组 `field`) |
 | 腔体/滤波器/DRA,要谐振频率与 Q | [`flow/eigenmode.md`](flow/eigenmode.md) | **design 必须建成 Eigenmode 类型**,不要端口 |
 | 无限阵 / FSS / 超表面单元 | [`flow/periodic.md`](flow/periodic.md) | **不要 `create_open_region`** |
 | 阵列复制、改网格、建螺旋 | [`flow/geometry-advanced.md`](flow/geometry-advanced.md) | 复制出来的副本**不带 PE**,复制完重新赋 |
@@ -76,7 +76,7 @@ HFSS 默认自适应网格一般可靠:`analyze` 报 `converged: true` 且没有
 - `new_design` / `delete_design` 除非用户明确要求,**永远别主动调**。
 
 ## 3. 通用约定
-- 周期边界、本征模、统计分析、进阶边界、网格加密、改建模历史这几组是**扩展工具**,不在工具列表里:
+- 周期边界、本征模、统计分析、进阶边界、网格加密、改建模历史、场诊断这几组是**扩展工具**,不在工具列表里:
   先 `extra_tools(group=...)` 看参数,再 `extra_tools(tool=..., arguments={...})` 调。流程卡里点名的这些工具都这样调。
 - 坐标/尺寸传**字符串**,带单位(`'10mm'`)或变量表达式(`'L1+1mm'`);对象名只用英文字母数字下划线。
 - 复杂结构先 `set_variable` 再用变量名建几何;建错用 `delete_object` 删掉重建,不要堆叠。

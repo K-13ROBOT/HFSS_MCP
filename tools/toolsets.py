@@ -19,6 +19,8 @@ EXTRA_GROUPS = {
              "手动网格加密(默认自适应网格够用,有证据才加)"),
     "history": (["get_object_history", "set_history_props", "replace_in_history"],
                 "改已有对象的建模历史参数(多边形锚点换表达式、布尔里工具圆的半径/位置),不新建对象"),
+    "field": (["get_current_along_path", "export_field_plane"],
+              "场诊断:沿线表面电流分布、切面 |E|/|H| 场图(指标不对又不知道为什么时才看)"),
 }
 EXTRA_TOOLS = {n: g for g, (names, _) in EXTRA_GROUPS.items() for n in names}
 
