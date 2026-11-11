@@ -58,6 +58,14 @@ def _progid(version):
     return "Ansoft.ElectronicsDesktop." + str(version)[0:6]
 
 
+def _create_aedt_app(version):
+    """COM 激活前补齐 CPU 核数变量:有些 MCP 宿主会过滤掉环境变量,NUMBER_OF_PROCESSORS 缺失时
+    HFSSCOMENGINE(2025.2)可能直接崩在 CRT 里。只改本进程的环境,宿主显式给的值不动。"""
+    if not os.environ.get("NUMBER_OF_PROCESSORS", "").strip():
+        os.environ["NUMBER_OF_PROCESSORS"] = str(os.cpu_count() or 1)
+    return _wc.Dispatch(_progid(version))
+
+
 def _clear(ctx):
     for k in ("app", "oDesktop", "oProject", "oDesign", "oEditor"):
         ctx[k] = None
@@ -150,7 +158,7 @@ def open_desktop(ctx, version=None):
     version = version or _DEFAULT_VERSION
     pids0 = _aedt_pids()
     try:
-        app = _wc.Dispatch(_progid(version))
+        app = _create_aedt_app(version)
         oDesktop = app.GetAppDesktop()
     except Exception as e:
         return {"ok": False, "error": f"连接 AEDT {version} 失败: {type(e).__name__}: {e}",
@@ -226,7 +234,7 @@ def attach_desktop(ctx, version=None):
             return {"ok": False, "error": "没有在运行的 AEDT 实例(找不到 ansysedt.exe 进程)",
                     "hint": "attach 只接手已在运行的实例,不新起;要新起用 open_desktop"}
         try:
-            app = _wc.Dispatch(_progid(version))
+            app = _create_aedt_app(version)
             oDesktop = app.GetAppDesktop()
             via = "Dispatch(GetActiveObject 失败后退回)"
         except Exception as e2:
