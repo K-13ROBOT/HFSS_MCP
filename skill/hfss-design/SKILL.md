@@ -66,6 +66,7 @@ HFSS 默认自适应网格一般可靠:`analyze` 报 `converged: true` 且没有
 - 启动时 HFSS 是关的,建模工具都会报"无 active design"。打开/启动 → `open_desktop`;连已开的 → `attach_desktop`;
   然后 `new_project` + `new_design`,或 `open_project(路径)`;切换用 `activate_project` / `activate_design`。
 - **新任务先 `design_summary` 看全景**,确认 setup/端口/边界是否已存在,别重复创建。
+- 用户说关掉 HFSS → `close_desktop`。默认有护栏:实例里开着别的工程、或这个实例是 attach 接来的,只关本会话的工程、不退出 AEDT,返回里会说明;用户明确要关整个 AEDT 时再传 `force=true`(里面其他工程的未存改动会丢)。**终端关掉时,本会话自己起的实例会自动存好工程再退出**,不用特意去关。
 - ≥3 步的复合任务动手前用宿主的待办机制(如 TodoWrite)列规划,写清最终交付和可量化指标;简单请求不用。
 - `analyze` / `run_parametric_sweep` 等阻塞操作会弹权限确认:调用前先说清跑什么、为什么、预估耗时;用户拒绝就先说明再等回应。
 

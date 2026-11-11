@@ -19,7 +19,7 @@
 
 | 域 | 能力 |
 |---|---|
-| **会话** | open/attach/close、新建工程与设计、**从路径打开已有 .aedt**、切换/列举、保存工程 |
+| **会话** | open/attach/close、新建工程与设计、**从路径打开已有 .aedt**、切换/列举、保存工程。**关闭会话时本会话自己起的 AEDT 会存好工程再退出**(attach 来的实例、或里面开着别人工程的实例留着);`close_desktop(force=true)` 可以连整个 AEDT 一起关掉 |
 | **几何** | box/rectangle/circle/cylinder/sphere/polyline/helix、布尔(并/减/交)、`split`、`thicken`(sheet→实体)、变换(移动/旋转/镜像/线阵·环阵复制)、变量驱动、材料(含**自定义 εr/tanδ**)、delete |
 | **改已有对象** | `get_object_history` 看建模历史(每步操作的路径和参数,含布尔里被消耗的工具对象、多边形去重点表);`set_history_props` 改某一步的参数(如减掉的工具圆的半径/圆心);`replace_in_history` 把写死的值批量换成表达式(如馈线多边形里 200 个点的锚点 `-1.8mm` → 变量)。不新建对象,改完跟着变量联动。2019.2 没有对象模型,只能按 `对象:命令:序号` 改单个操作的参数 |
 | **自检 & 诊断** | `get_object_bbox`(看层叠/搭接)、`design_summary`、list_objects/variables;**`validate_design`**(HFSS 自带 Validation Check,analyze 前挡配置漏)、**`get_messages`**(读消息窗口——"跑通了但数不对"的第一手线索) |

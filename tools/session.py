@@ -73,6 +73,20 @@ def _clear(ctx):
             d.clear()
 
 
+def _drop_project(ctx):
+    """只丢工程/design 句柄,保留 desktop 连接。关掉本会话的工程后 oDesktop 仍然可用 ——
+    用户还能再调 close_desktop(force=true) 把整个 AEDT 退掉(以前这里把 desktop 也清了,force 就没法用了)。"""
+    for k in ("oProject", "oDesign", "oEditor"):
+        ctx[k] = None
+    ctx["project_name"] = None
+    ctx["design_name"] = None
+    ctx["own_projects"] = set()
+    st = ctx.get("state")
+    if st is not None:
+        st.project = ""; st.design = ""
+        for d in (st.variables, st.objects, st.boundaries, st.excitations, st.setups):
+            d.clear()
+
 def _aedt_pids():
     """当前在跑的 ansysedt.exe 的 PID 集合;查不了返回 None(不据此做判断)。"""
     import subprocess
@@ -601,14 +615,21 @@ def delete_design(ctx, names, confirm=False):
     "type": "function",
     "function": {
         "name": "close_desktop",
-        "description": "关闭当前 HFSS 桌面进程。用户说'关闭/退出 HFSS'时调用。",
+        "description": ("关闭当前 HFSS 桌面进程。用户说'关闭/退出 HFSS'时调用。"
+            "默认有护栏:实例里开着不是本会话的工程、或这个实例是 attach 接来的,就只关本会话的工程、不退出 AEDT。"
+            "**用户明确要关整个 AEDT**(比如'把 HFSS 关掉'、'退出 AEDT')时传 force=true 绕过护栏"
+            "—— 那会把实例里其他工程的**未存改动一起丢掉**。"),
         "parameters": {
             "type": "object",
-            "properties": {"save": {"type": "boolean", "default": False, "description": "关闭前是否保存当前工程"}},
+            "properties": {
+                "save": {"type": "boolean", "default": False, "description": "关闭前是否保存当前工程"},
+                "force": {"type": "boolean", "default": False,
+                          "description": "true = 不看护栏直接退出 AEDT;里面其他工程的未存改动会丢"},
+            },
         },
     },
 })
-def close_desktop(ctx, save=False):
+def close_desktop(ctx, save=False, force=False):
     oDesktop = ctx.get("oDesktop")
     if oDesktop is None:
         return {"ok": False, "error": "当前没有 desktop"}
@@ -635,7 +656,7 @@ def close_desktop(ctx, save=False):
             err = _save_project_by_name(oDesktop, p)
             if err:
                 save_failed[p] = err
-    if others or ctx.get("shared_instance") or save_failed:
+    if not force and (others or ctx.get("shared_instance") or save_failed):
         closed, failed = [], {}
         for p in mine:
             if p in save_failed:
@@ -645,7 +666,7 @@ def close_desktop(ctx, save=False):
                 closed.append(p)
             except Exception as e:
                 failed[p] = f"{type(e).__name__}: {e}"
-        _clear(ctx)
+        _drop_project(ctx)
         out = {"ok": not save_failed, "quit_application": False,
                "closed_own_projects": closed}
         if others:
@@ -654,6 +675,8 @@ def close_desktop(ctx, save=False):
                            "**没有退出 AEDT** —— 只关掉了本会话自己的工程。")
         elif not save_failed:
             out["note"] = "这个实例不是本会话起的,**没有退出 AEDT** —— 只关掉了本会话自己的工程。"
+        out["hint"] = ("要连整个 AEDT 一起关(里面其他工程的未存改动会丢),再调一次 "
+                       "close_desktop(force=true)")
         if save_failed:
             out["save_failed"] = save_failed
             out["error"] = (f"{len(save_failed)} 个工程保存失败({', '.join(save_failed)}),"
@@ -668,7 +691,38 @@ def close_desktop(ctx, save=False):
         _clear(ctx)
         return {"ok": False, "error": f"关闭 desktop 出错: {e},但状态已清空"}
     _clear(ctx)
-    return {"ok": True, "quit_application": True}
+    out = {"ok": True, "quit_application": True}
+    if force and others:
+        out["also_closed_not_ours"] = others
+        out["note"] = f"按 force 退出了 AEDT,里面另有 {len(others)} 个不是本会话的工程也被一起关掉了"
+    if force and save_failed:
+        out["save_failed"] = save_failed
+        out["warning"] = "这些工程保存失败,但按 force 还是退出了 —— 未存的改动已丢"
+    return out
+
+
+def quit_on_exit(ctx):
+    """MCP server 退出(终端关掉/Claude Code 退出)时收尾。返回一句说明,没动作返回 None。
+
+    只退**本会话自己起**的实例(shared_instance 为假),且里面没有别人的工程:
+    先存好自己的工程,存不上就留着 AEDT 不关,宁可留进程也不丢改动。
+    attach 接来的实例、有别人工程的实例一律不动 —— 那是用户的 AEDT。
+    环境变量 HFSS_AGENT_KEEP_ON_EXIT=1 可整条关掉。"""
+    if os.environ.get("HFSS_AGENT_KEEP_ON_EXIT", "").lower() in ("1", "true", "yes"):
+        return "HFSS_AGENT_KEEP_ON_EXIT 已设置,保留 AEDT"
+    if not _alive(ctx):
+        return None
+    shared = bool(ctx.get("shared_instance"))
+    r = close_desktop(ctx, save=True, force=False)
+    if r.get("quit_application"):
+        return "已保存本会话的工程并退出 AEDT"
+    if shared:
+        # 接管来的实例:关掉自己的工程就走,AEDT 留给用户(和 close_desktop 的护栏一致)
+        note = r.get("note") or r.get("error") or ""
+        return f"这是接管的实例,已关掉本会话的工程,保留 AEDT。{note}"
+    if r.get("save_failed"):
+        return f"工程保存失败({', '.join(r['save_failed'])}),没退出 AEDT —— 请手工保存后关闭"
+    return f"没退出 AEDT: {r.get('note') or r.get('error')}"
 
 
 def _save_project_by_name(oDesktop, name):

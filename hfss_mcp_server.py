@@ -85,14 +85,30 @@ async def call_tool(name, arguments):
     return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, default=str))]
 
 
+_released = False
+
+
 def _release():
-    """退出时只清进程内引用,不主动关用户的 HFSS(COM 连接随进程退出自然断开)。
-    清引用会触发 COM Release,必须回到创建句柄的那个线程上做,别跨公寓。"""
-    def _clear():
+    """退出时收尾:本会话自己起的 AEDT 实例,存好自己的工程后退出(终端关了不该留下个 AEDT 进程);
+    attach 接来的、或里面开着别人工程的实例一律留着,只关本会话的工程 —— 详见 tools.session.quit_on_exit。
+    最后清进程内引用(触发 COM Release)。这两步都必须在创建句柄的那个线程上做,别跨公寓。"""
+    global _released
+    if _released:
+        return
+    _released = True
+
+    def _finish():
+        try:
+            from tools.session import quit_on_exit
+            msg = quit_on_exit(ctx)
+            if msg:
+                print("[exit] " + msg, flush=True)
+        except Exception as e:
+            print("[exit] 收尾失败,保留 AEDT: %s: %s" % (type(e).__name__, e), flush=True)
         for k in ("app", "oDesktop", "oProject", "oDesign", "oEditor"):
             ctx[k] = None
     try:
-        _COM_POOL.submit(_clear).result(timeout=5)
+        _COM_POOL.submit(_finish).result(timeout=20)
     except Exception:
         pass
     _COM_POOL.shutdown(wait=False)
@@ -111,4 +127,10 @@ async def main():
 
 
 if __name__ == "__main__":
-    anyio.run(main)
+    # 收尾必须在解释器关闭**之前**做:Python 3.9+ 在 atexit 之前就关掉了线程池
+    # (concurrent.futures 的 _python_exit),那时再往 _COM_POOL 提交会抛 RuntimeError。
+    # atexit 里再挂一份只作兜底,_release 幂等。
+    try:
+        anyio.run(main)
+    finally:
+        _release()
