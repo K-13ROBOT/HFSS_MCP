@@ -21,6 +21,18 @@ def _drop_stale(csv_path):
         pass
 
 
+def _drop_report(oModule, rname):
+    """删掉取数用的临时报告。HFSS 的 Results 树会列出每个报告,这类工具每次调用都会建一个,
+    不删就越积越多、挡住用户自己建的结果。**只删报告定义,不动求解结果。**
+    先查存在与否:对不存在的报告 DeleteReports 会在消息窗口记一条 [error] "Report not found",
+    让 get_messages 平白多一条假错误(2019.2 上老 arity 必失败,每次都留)。"""
+    try:
+        if rname in [str(x) for x in oModule.GetAllReportNames()]:
+            oModule.DeleteReports([rname])
+    except Exception:
+        pass
+
+
 _NO_DATA = "报告建出来了但没导出数据 —— 这个变量组合/扫频多半没有解(改了变量或几何后需要重新 analyze)"
 
 
@@ -462,14 +474,12 @@ def get_s_parameters(ctx, setup=None, sweep=None, port=None, summary_only=True, 
     try:
         _drop_stale(csv_path)
         oModule.ExportToFile(report_name, csv_path)
-        try:
-            oModule.DeleteReports([report_name])
-        except Exception:
-            pass
-        if not os.path.exists(csv_path):
-            return {"ok": False, "error": _NO_DATA, "solution": soln}
     except Exception as e:
         return {"ok": False, "error": f"ExportToFile 失败: {type(e).__name__}: {e}"}
+    finally:
+        _drop_report(oModule, report_name)      # 临时报告不留在 Results 树里
+    if not os.path.exists(csv_path):
+        return {"ok": False, "error": _NO_DATA, "solution": soln}
 
     # 解析 CSV
     try:
@@ -563,15 +573,14 @@ def _report_to_csv(oDesign, soln, exprs, csv_path):
             oModule.CreateReport(*args)
             _drop_stale(csv_path)
             oModule.ExportToFile(rname, csv_path)
-            try:
-                oModule.DeleteReports([rname])
-            except Exception:
-                pass
             if not os.path.exists(csv_path):
-                return False, _NO_DATA
+                last = _NO_DATA
+                continue
             return True, None
         except Exception as e:
             last = f"{type(e).__name__}: {e}"
+        finally:
+            _drop_report(oModule, rname)        # 成功/失败都别把临时报告留在 Results 树里
     return False, last
 
 
@@ -755,13 +764,140 @@ def _loop_check(freqs, re, im, band, z0, target_db):
 _POL = {"total": "Total", "lhcp": "LHCP", "rhcp": "RHCP", "theta": "Theta", "phi": "Phi"}
 
 
+def _interp_x(x0, y0, x1, y1, y):
+    """在 (x0,y0)-(x1,y1) 段上线性插值出 y 对应的 x。"""
+    if y1 == y0:
+        return x0
+    return x0 + (x1 - x0) * (y - y0) / (y1 - y0)
+
+
+def _beam_metrics(thetas, gains, fb=None, wrap=False):
+    """一刀方向图 → 指标表:峰值、HPBW、第一旁瓣。角度单位度。
+    fb 传 (thetas, gains) 时另算前后比 —— 那必须是含 θ=0° 和 θ=180° 的原始 0~180 切面
+    (补成的 ±90° 切面里没有 180°,算不了背面)。"""
+    pk = max(gains)
+    pi = gains.index(pk)
+    half = pk - 3.0
+    left = right = None
+    for k in range(pi, 0, -1):
+        if gains[k] >= half > gains[k - 1]:
+            left = _interp_x(thetas[k - 1], gains[k - 1], thetas[k], gains[k], half)
+            break
+    for k in range(pi, len(gains) - 1):
+        if gains[k] >= half > gains[k + 1]:
+            right = _interp_x(thetas[k], gains[k], thetas[k + 1], gains[k + 1], half)
+            break
+    # 主瓣占据的索引区间(用 -3dB 交点圈定);两侧再往外找最近的局部极大 = 第一旁瓣
+    lo_i = next((k for k in range(pi, -1, -1) if left is not None and thetas[k] <= left), 0)
+    hi_i = next((k for k in range(pi, len(thetas)) if right is not None and thetas[k] >= right), len(thetas) - 1)
+    side = None
+    idxs = range(len(gains)) if wrap else range(1, len(gains) - 1)   # 整圈时首尾相接,背面在两端
+    cand = []
+    for k in idxs:
+        if lo_i < k < hi_i:
+            continue
+        prev = gains[k - 1] if k > 0 else gains[-1]
+        nxt = gains[k + 1] if k < len(gains) - 1 else gains[0]
+        if gains[k] >= prev and gains[k] >= nxt:
+            cand.append(k)
+    if cand:
+        k = min(cand, key=lambda i: abs(thetas[i] - thetas[pi]))
+        side = (round(gains[k] - pk, 2), round(thetas[k], 1))
+    fbr = None
+    if fb is not None:
+        front = [g for t, g in zip(*fb) if t <= 2.0]
+        back = [g for t, g in zip(*fb) if t >= 178.0]
+        fbr = round(max(front) - max(back), 2) if front and back else None
+    # θ 切面只有 0~180(半个平面):波束在 θ=0/180 时主瓣只有一侧落在切面里,
+    # 这时按对称补另一半(法向波束的标准读法),并标出来源
+    hpbw = None
+    mirrored = False
+    if left is not None and right is not None:
+        hpbw = right - left
+    elif right is not None and pi <= 1:
+        hpbw, mirrored = 2 * (right - thetas[pi]), True
+    elif left is not None and pi >= len(thetas) - 2:
+        hpbw, mirrored = 2 * (thetas[pi] - left), True
+    out = {"peak_gain_dB": round(pk, 2), "peak_theta_deg": round(thetas[pi], 1),
+           "hpbw_deg": round(hpbw, 1) if hpbw is not None else None,
+           "first_sidelobe_dB": side[0] if side else None,
+           "first_sidelobe_theta_deg": side[1] if side else None,
+           "front_to_back_dB": fbr}
+    if mirrored:
+        out["hpbw_note"] = "峰值在切面边缘(θ=0/180),按对称补的另一半"
+    return out
+
+
+def _fetch_farfield_cut(oModule, soln, sphere, phi, freq, expr, csv_path):
+    """建一个远场 Data Table 报告 → 导出 CSV → 解析成 (thetas, cols, col_freqs)。
+    失败返回 (None, 错误串)。报告在 finally 里删掉。"""
+    rname = "ff_tmp"
+    fam = ["Theta:=", ["All"], "Phi:=", [str(phi)], "Freq:=", [str(freq)] if freq else ["All"]]
+    trace = ["X Component:=", "Theta", "Y Component:=", [expr]]
+    forms = [
+        (rname, "Far Fields", "Data Table", soln, ["Context:=", sphere], fam, trace, []),
+        (rname, "Far Fields", "Data Table", soln, ["Context:=", sphere], fam, trace),
+    ]
+    last, done = None, False
+    for args in forms:
+        try:
+            oModule.CreateReport(*args)
+            _drop_stale(csv_path)
+            oModule.ExportToFile(rname, csv_path)
+            if not os.path.exists(csv_path):
+                last = _NO_DATA
+                continue
+            done = True
+            break
+        except Exception as e:
+            last = f"{type(e).__name__}: {e}"
+        finally:
+            _drop_report(oModule, rname)        # 临时报告不留在 Results 树里
+    if not done:
+        return None, last
+    try:
+        with open(csv_path, "r", encoding="utf-8", errors="replace") as f:
+            rows = [ln.rstrip("\n").split(",") for ln in f if ln.strip()]
+    except Exception as e:
+        return None, f"读 CSV 失败: {e}"
+    # 多频点扫频导出的是宽表:第 1 列 Theta,之后每个频点一列(表头带 Freq='...')
+    header = rows[0] if rows else []
+    col_freqs = []
+    for h in header[1:]:
+        m = re.search(r"Freq='([^']+)'", h)
+        col_freqs.append(m.group(1) if m else (str(freq) if freq else None))
+    thetas, cols = [], [[] for _ in col_freqs]
+    for r in rows[1:]:
+        if len(r) < 1 + len(col_freqs):
+            continue
+        try:
+            t = float(r[0].strip().strip('"').split()[0])
+            vals = [float(r[j + 1].strip().strip('"').split()[0]) for j in range(len(col_freqs))]
+        except Exception:
+            continue
+        thetas.append(t)
+        for j, v in enumerate(vals):
+            cols[j].append(v)
+    if not thetas or not col_freqs:
+        return None, "远场数据空"
+    return (thetas, cols, col_freqs), None
+
+
+def _deg_num(s):
+    m = re.search(r"-?\d+(?:\.\d+)?", str(s))
+    return float(m.group(0)) if m else 0.0
+
+
 @tool({
     "type": "function",
     "function": {
         "name": "get_radiation_pattern",
-        "description": ("导出远场方向图:增益(dB) vs theta,按 phi 切面(默认 E面0°/H面90°)。"
-                        "返回每刀 theta/gain 数组+峰值。调用前必须已 analyze,且 design 有 create_open_region + create_infinite_sphere。"
-                        "对多频点的存场扫频:不传 freq 则每刀按频点给 by_freq(每个频点一组 gain/峰值),"
+        "description": ("取远场方向图,按 phi 切面(默认 E面0°/H面90°)。"
+                        "**默认返回每个切面的指标表**:峰值增益与角度、HPBW、第一旁瓣电平与角度、前后比;"
+                        "θ 默认按 −180~180 整圈(-90~90 仰角读法):球面是 0~180 时自动补 φ+180 的另一半,"
+                        "要看整条曲线再传 points=true(返回 theta/gain 逐点数组,几十点、很占篇幅)。"
+                        "调用前必须已 analyze,且 design 有 create_open_region + create_infinite_sphere。"
+                        "对多频点的存场扫频:不传 freq 则每刀按频点给 by_freq(每个频点一组指标),"
                         "另附 boresight_gain_dB 汇总轴向增益 vs 频率;传 freq 只取该频点。"),
         "parameters": {
             "type": "object",
@@ -774,12 +910,18 @@ _POL = {"total": "Total", "lhcp": "LHCP", "rhcp": "RHCP", "theta": "Theta", "phi
                              "description": "phi 切面列表带 deg,默认 ['0deg','90deg']"},
                 "gain_type": {"type": "string", "enum": ["realized", "total"], "default": "realized"},
                 "polarization": {"type": "string", "enum": ["total", "lhcp", "rhcp", "theta", "phi"], "default": "total"},
+                "points": {"type": "boolean", "default": False,
+                           "description": "true 才返回逐点方向图(theta_deg + gain_dB);默认只给指标表"},
+                "signed_theta": {"type": "boolean", "default": True,
+                                 "description": "θ 用 -180~180 的整圈(-90~90 的仰角读法),法向波束的主瓣两侧都在;"
+                                                "球面本身是 0~180 时会自动补 φ+180 的一半。false=只用球面自身的范围"},
             },
         },
     },
 })
 def get_radiation_pattern(ctx, setup=None, sweep="LastAdaptive", sphere="Sphere1",
-                          phi_cuts=None, gain_type="realized", polarization="total", freq=None):
+                          phi_cuts=None, gain_type="realized", polarization="total", freq=None,
+                          points=False, signed_theta=True):
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
     setup, err = resolve_setup(ctx, setup)
@@ -793,82 +935,74 @@ def get_radiation_pattern(ctx, setup=None, sweep="LastAdaptive", sphere="Sphere1
     oModule = oDesign.GetModule("ReportSetup")
     from .session import EXPORTS_DIR
 
-    cuts = []
+    raw = []          # (phi, thetas, cols, col_freqs):原始切面
     for phi in phi_cuts:
-        rname = "ff_tmp"
-        csv_path = os.path.join(EXPORTS_DIR, f"_ff_{phi}.csv")
-        fam = ["Theta:=", ["All"], "Phi:=", [str(phi)], "Freq:=", [str(freq)] if freq else ["All"]]
-        trace = ["X Component:=", "Theta", "Y Component:=", [expr]]
-        forms = [
-            (rname, "Far Fields", "Data Table", soln, ["Context:=", sphere], fam, trace, []),
-            (rname, "Far Fields", "Data Table", soln, ["Context:=", sphere], fam, trace),
-        ]
-        last = None
-        done = False
-        for args in forms:
-            try:
-                oModule.CreateReport(*args)
-                _drop_stale(csv_path)
-                oModule.ExportToFile(rname, csv_path)
-                try:
-                    oModule.DeleteReports([rname])
-                except Exception:
-                    pass
-                if not os.path.exists(csv_path):
-                    return {"ok": False, "error": f"{_NO_DATA} (phi={phi})", "solution": soln}
-                done = True
-                break
-            except Exception as e:
-                last = f"{type(e).__name__}: {e}"
-        if not done:
-            return {"ok": False, "error": f"远场报告失败 (phi={phi}): {last}",
+        got, err = _fetch_farfield_cut(oModule, soln, sphere, phi, freq, expr,
+                                       os.path.join(EXPORTS_DIR, f"_ff_{phi}.csv"))
+        if err:
+            return {"ok": False, "error": f"远场报告失败 (phi={phi}): {err}",
                     "hint": "确认已 analyze 且有 create_infinite_sphere + open_region"}
-        try:
-            with open(csv_path, "r", encoding="utf-8", errors="replace") as f:
-                rows = [ln.rstrip("\n").split(",") for ln in f if ln.strip()]
-        except Exception as e:
-            return {"ok": False, "error": f"读 CSV 失败: {e}"}
-        # 多频点扫频导出的是宽表:第 1 列 Theta,之后每个频点一列(表头带 Freq='...')
-        header = rows[0] if rows else []
-        col_freqs = []
-        for h in header[1:]:
-            m = re.search(r"Freq='([^']+)'", h)
-            col_freqs.append(m.group(1) if m else (str(freq) if freq else None))
-        thetas, cols = [], [[] for _ in col_freqs]
-        for r in rows[1:]:
-            if len(r) < 1 + len(col_freqs):
-                continue
-            try:
-                t = float(r[0].strip().strip('"').split()[0])
-                vals = [float(r[j + 1].strip().strip('"').split()[0]) for j in range(len(col_freqs))]
-            except Exception:
-                continue
-            thetas.append(t)
-            for j, v in enumerate(vals):
-                cols[j].append(v)
-        if not thetas or not col_freqs:
-            return {"ok": False, "error": f"远场数据空 (phi={phi})", "csv_header": header or None}
+        raw.append((str(phi), got[0], got[1], got[2]))
 
-        def _one(gains, f):
-            pk = max(gains); pi = gains.index(pk)
-            return {"freq": f, "gain_dB": [round(g, 3) for g in gains],
-                    "peak_gain_dB": round(pk, 2), "peak_theta_deg": round(thetas[pi], 2)}
-        cut = {"phi": str(phi), "theta_deg": [round(t, 2) for t in thetas], "n_points": len(thetas)}
+    cuts = []
+    for phi, thetas, cols, col_freqs in raw:
+        use_t, use_cols, frame = thetas, cols, "as_sphere"
+        # 球面是 0~180 时 θ 只画了半个平面(峰值在 θ=0/180 时主瓣只有一半在切面里)。
+        # 再取一条 φ+180 的切面:它的 +θ 方向就是这条的 −θ,拼成 −180~180 的整圈,
+        # 主瓣两侧都在,HPBW 是直接量出来的,不用按对称假设补。
+        if signed_theta and thetas and min(thetas) >= -1e-9 and max(thetas) >= 179.9:
+            mph = f"{(_deg_num(phi) + 180.0) % 360.0:g}deg"
+            got, err = _fetch_farfield_cut(oModule, soln, sphere, mph, freq, expr,
+                                           os.path.join(EXPORTS_DIR, f"_ff_{phi}_mirror.csv"))
+            if not err and len(got[0]) == len(thetas) and len(got[1]) == len(cols):
+                mt, mc, _mf = got
+                base_t = [t for t in thetas if t < 179.999]      # 180 与镜像的 −180 同向,留一个
+                use_t = sorted(set([-t for t in mt if t > 1e-9] + base_t))
+                use_cols = []
+                for j in range(len(cols)):
+                    d = {}
+                    for t, v in zip(mt, mc[j]):
+                        if t > 1e-9:
+                            d[-t] = v
+                    for t, v in zip(thetas, cols[j]):
+                        if t < 179.999:
+                            d[t] = v
+                        else:
+                            d.setdefault(180.0, v)
+                    use_cols.append([d[t] for t in use_t])
+                frame = "signed"
+
+        def _one(j, f):
+            # 前后比只用原始 0~180 切面算(±180 的整圈里背面在两端,拿 ±2° 判不对)
+            m = _beam_metrics(use_t, use_cols[j], fb=(thetas, cols[j]), wrap=(frame == "signed"))
+            m["freq"] = f
+            return m
+        cut = {"phi": phi, "n_points": len(use_t), "theta_frame": frame}
         if len(col_freqs) == 1:
-            cut.update(_one(cols[0], col_freqs[0]))
+            cut.update(_one(0, col_freqs[0]))
         else:
-            # 多频点时不放顶层 gain_dB,免得被当成"那一个"频点的结果
-            cut["by_freq"] = [_one(g, f) for g, f in zip(cols, col_freqs)]
+            # 多频点时不放顶层指标,免得被当成"那一个"频点的结果
+            cut["by_freq"] = [_one(j, f) for j, f in enumerate(col_freqs)]
+        if points:                      # 逐点曲线只在明确要看的时候才返回
+            pts = {"theta_deg": [round(t, 1) for t in use_t]}
+            if len(col_freqs) == 1:
+                pts["gain_dB"] = [round(g, 3) for g in use_cols[0]]
+            else:
+                pts["by_freq"] = [{"freq": f, "gain_dB": [round(g, 3) for g in col]}
+                                  for f, col in zip(col_freqs, use_cols)]
+            cut["points"] = pts
         cuts.append(cut)
 
     out = {"ok": True, "setup": setup, "sphere": sphere, "gain_type": gain_type,
            "polarization": polarization, "metric": expr, "n_cuts": len(cuts), "cuts": cuts}
+    if not points:
+        out["note"] = "每条切面给的是指标表;要看整条方向图传 points=true"
     # 轴向增益 vs 频率:取第一刀 theta=0(各刀在 theta=0 是同一个方向)
-    c0 = cuts[0]
-    if 0.0 in c0["theta_deg"]:
-        i0 = c0["theta_deg"].index(0.0)
-        per = c0["by_freq"] if "by_freq" in c0 else [c0]
-        out["boresight_gain_dB"] = [{"freq": p["freq"], "gain_dB": p["gain_dB"][i0]} for p in per]
+    _, thetas0, cols0, f0 = raw[0]
+    if 0.0 in thetas0:
+        i0 = thetas0.index(0.0)
+        out["boresight_gain_dB"] = [{"freq": f, "gain_dB": round(col[i0], 3)}
+                                    for f, col in zip(f0, cols0)]
     return out
 
 

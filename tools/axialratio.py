@@ -11,6 +11,7 @@
 import os
 
 from . import tool, resolve_setup
+from .analysis import _drop_report
 
 
 def _contiguous_bands(freqs, vals, threshold):
@@ -49,7 +50,8 @@ def _ghz(v):
     "type": "function",
     "function": {
         "name": "get_axial_ratio",
-        "description": ("取单个已求解设计的**轴比 AR(dB) vs 频率**曲线 + 3dB 轴比带宽,默认 boresight(θ=0,φ=0)。"
+        "description": ("取单个已求解设计的**轴比 AR(dB) vs 频率** + 3dB 轴比带宽,默认 boresight(θ=0,φ=0)。"
+            "默认返回指标表(最小 AR 及其频点、3dB 轴比带宽、区间内最差 AR);要看整条曲线传 points=true。"
             "与 get_parametric_farfield(metrics=['axial_ratio']) 的区别:那个是参扫各组合在**单频点**的最小 AR;"
             "这个是一个设计**整条扫频**的 AR 曲线,能直接给出 AR≤3dB 的连续带宽。"
             "**前提:扫频是 create_sweep(sweep_type='Discrete', save_fields=True) 建的**,且有辐射边界和无穷远球面。"),
@@ -66,14 +68,16 @@ def _ghz(v):
                 "threshold_dB": {"type": "number", "default": 3, "description": "轴比带宽判据,默认 3dB"},
                 "freq_range": {"type": "array", "items": {"type": "string"},
                                "description": "可选,只统计该区间并判定是否全带达标,如 ['14.5GHz','16.5GHz']"},
+                "points": {"type": "boolean", "default": False,
+                           "description": "true 才回传 AR 曲线逐点数据;默认只给指标表"},
                 "max_curve_points": {"type": "integer", "default": 60,
-                                     "description": "回传曲线最大点数(等间隔抽稀,省上下文)。0=不回传曲线"},
+                                     "description": "points=true 时曲线最大点数(等间隔抽稀);0=不回传"},
             },
         },
     },
 })
 def get_axial_ratio(ctx, setup=None, sweep="Sweep1", sphere="Sphere1", theta="0deg", phi="0deg",
-                    threshold_dB=3, freq_range=None, max_curve_points=60):
+                    threshold_dB=3, freq_range=None, points=False, max_curve_points=60):
     oDesign = ctx["oDesign"]
     state = ctx.get("state")
     setup, err = resolve_setup(ctx, setup)
@@ -99,14 +103,12 @@ def get_axial_ratio(ctx, setup=None, sweep="Sweep1", sphere="Sphere1", theta="0d
         try:
             oModule.CreateReport(*args)
             oModule.ExportToFile(rname, csv_path)
-            try:
-                oModule.DeleteReports([rname])
-            except Exception:
-                pass
             done = True
             break
         except Exception as e:
             last = "%s: %s" % (type(e).__name__, e)
+        finally:
+            _drop_report(oModule, rname)      # 临时报告不留在 Results 树里
     if not done:
         return {"ok": False, "error": "轴比报告失败: %s" % last,
                 "hint": "确认已 analyze;扫频须 create_sweep(..., sweep_type='Discrete', save_fields=True) 建;"
@@ -225,7 +227,7 @@ def get_axial_ratio(ctx, setup=None, sweep="Sweep1", sphere="Sphere1", theta="0d
     if len(bands) > 1:
         out["bands"] = [{"low_ghz": round(a, 4), "high_ghz": round(b, 4)} for a, b in bands]
 
-    if max_curve_points and max_curve_points > 0:
+    if points and max_curve_points and max_curve_points > 0:
         n = len(freqs)
         if n <= max_curve_points:
             idx = list(range(n))

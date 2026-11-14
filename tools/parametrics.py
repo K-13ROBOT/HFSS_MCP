@@ -8,6 +8,7 @@ import os as _os
 import time
 
 from . import tool, resolve_setup
+from .analysis import _drop_report
 
 _POL = {"total": "Total", "lhcp": "LHCP", "rhcp": "RHCP", "theta": "Theta", "phi": "Phi"}
 _CROSS = {"lhcp": "rhcp", "rhcp": "lhcp", "theta": "phi", "phi": "theta"}
@@ -341,15 +342,13 @@ def _param_report(oDesign, category, soln, context, families, trace, csv_path):
         try:
             oM.CreateReport(*a)
             oM.ExportToFile(rn, csv_path)
-            try:
-                oM.DeleteReports([rn])
-            except Exception:
-                pass
             if _os.path.exists(csv_path):   # 真生成了才算成功
                 return True, None
             last = "CreateReport/ExportToFile 没报错但没生成文件(报告可能空)"
         except Exception as e:
             last = f"{type(e).__name__}: {e}"
+        finally:
+            _drop_report(oM, rn)            # 临时报告不留在 Results 树里
     return False, last
 
 

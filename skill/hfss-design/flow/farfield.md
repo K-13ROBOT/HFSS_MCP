@@ -7,8 +7,10 @@
 2. **多端口天线先 `set_port_excitation` 设好各口幅相**:不设就是全部 1W/0deg 的同相馈电。
    双馈 CP 一口 90deg、差分 180deg、相控阵按扫描角给相位梯度。它是后处理权重,设完直接取,不用重解。
 3. 取数:
-   - 整条方向图(增益 vs 角度)→ `get_radiation_pattern`;CP 传 `polarization='lhcp'/'rhcp'`
-   - 轴比 vs 频率 + 3dB 轴比带宽 → `get_axial_ratio`(需要存场离散扫频,见 s-parameters 第 6 步)
+   - 方向图指标(峰值/HPBW/第一旁瓣/前后比)→ `get_radiation_pattern`;CP 传 `polarization='lhcp'/'rhcp'`。
+     默认给指标表,要整条曲线(增益 vs 角度)才传 `points=true`。θ 默认按 −180~180 整圈
+     (球面是 0~180 时自动补 φ+180 的另一半),主瓣两侧都在,HPBW 是直接量出来的
+   - 轴比 + 3dB 轴比带宽 → `get_axial_ratio`(需要存场离散扫频,见 s-parameters 第 6 步);默认给指标表,要看曲线传 `points=true`
    - 参扫各组合的标量指标 → `get_parametric_farfield(metrics=[...])`(gain / axial_ratio / front_to_back / hpbw / cross_pol,一次可取多个)
    - 看自适应频点之外的频点:取那条存场离散扫频,用 `freq` 指定频点(必须是扫频里有的点)
 
